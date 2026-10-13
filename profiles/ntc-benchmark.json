@@ -4,8 +4,9 @@
   "workDir": "..\\..\\Bear",
   "exe": "build\\bin\\Release\\Sandbox.exe",
   "architecture": "Ada",
-  "appSeconds": 25,
   "appArgs": "--ntc-benchmark --model Suzanne --samples 1000000",
+  "appTimeoutArgs": "--timeout {seconds}",
+  "appSeconds": 25,
   "variants": [
     { "name": "arm0", "args": "--arm 0" },
     { "name": "arm1", "args": "--arm 1" },

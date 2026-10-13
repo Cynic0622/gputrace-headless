@@ -217,7 +217,7 @@ $TOOLS = @(
                ngfxPath = @{ type = 'string'; description = 'ngfx.exe or its directory. Only needed when the automatic Nsight Graphics search misses (unusual install path, several versions).' }
                startAfterFrames = @{ type = 'number'; description = 'Frames to skip before capturing (default 300).' }
                frames = @{ type = 'number'; description = 'Frames to capture (default 8).' }
-               appSeconds = @{ type = 'number'; description = 'Application lifetime bound in seconds (default 20).' }
+               appSeconds = @{ type = 'number'; description = 'Seconds substituted into the profile appTimeoutArgs template. Only bounds the run if the profile declares that template - nothing here watches the application process.' }
                shaderProfiler = @{ type = 'boolean'; description = 'Warp-state sampling on (default true). Set false for plain multi-pass counters.' }
            }
        }

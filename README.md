@@ -33,6 +33,11 @@ so `ngfx` connects and then fails with `GPU Performance Counters unavailable`. T
 
 ## Quick start
 
+The commands below use the bundled `ntc-benchmark` profile, which points at a sibling checkout of
+the application it was written for — **substitute your own profile** (see
+[Bringing your own application](#bringing-your-own-application)) and check it with `-DryRun`
+before the first real capture.
+
 ```powershell
 # 1. Capture. One trace per variant, warp-state sampling on, all metrics auto-exported.
 .\gputrace-capture.ps1 -Profile ntc-benchmark
@@ -42,7 +47,8 @@ so `ngfx` connects and then fails with `GPU Performance Counters unavailable`. T
 .\gputrace-report.ps1 -Json -Validate -Dir gputrace\arm1     # for an agent to parse
 
 # 3. Registers / instruction footprint per variant, from a different API entirely.
-#    Run the app once with DSH_DUMP_PIPELINES=1 first, then:
+#    Run the application once with its own pipeline-dump switch on first - for the bundled
+#    profile's application that is DSH_DUMP_PIPELINES=1 - then:
 .\pipeline-dump-report.ps1
 
 # 4. Only when the counters themselves matter: one GPU Trace per variant.
@@ -56,7 +62,8 @@ so `ngfx` connects and then fails with `GPU Performance Counters unavailable`. T
 ## Profiles
 
 A profile is a JSON file describing one capturable target — everything the tool needs that is not
-about Nsight Graphics itself:
+about Nsight Graphics itself. It is the capture's configuration document: one file per target,
+no code changes to add one.
 
 ```json
 {
@@ -65,8 +72,9 @@ about Nsight Graphics itself:
   "workDir": "..\\..\\Bear",
   "exe": "build\\bin\\Release\\Sandbox.exe",
   "architecture": "Ada",
-  "appSeconds": 25,
   "appArgs": "--ntc-benchmark --model Suzanne --samples 1000000",
+  "appTimeoutArgs": "--timeout {seconds}",
+  "appSeconds": 25,
   "variants": [
     { "name": "arm0", "args": "--arm 0" },
     { "name": "arm1", "args": "--arm 1" }
@@ -74,20 +82,46 @@ about Nsight Graphics itself:
 }
 ```
 
-| Field | Meaning |
-| --- | --- |
-| `workDir` | The target's checkout. **Relative values resolve against the profile file**, so a profile can point at a tree next to itself. Falls back to `-WorkDir`, then the current directory. |
-| `exe` | Relative to `workDir`. |
-| `architecture` | Selects the Nsight metric set. **Set it explicitly on anything but Ada** — it defaults to `Ada` when omitted, and other architectures expose a different metric set (check with `gputrace_list_metrics`). |
-| `appArgs` | Base arguments; each variant's `args` are appended. |
-| `variants` | One trace per entry. **Names become directory names**, so keep them filesystem-safe. |
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `exe` | **yes** | The executable to trace. Relative to `workDir`. |
+| `variants` | **yes** | One trace per entry, each `{ "name", "args" }`. **`name` becomes a directory name**, so keep it filesystem-safe. |
+| `workDir` | recommended | The target's checkout. **A relative value resolves against the profile file**, so a profile can point at a tree next to itself. Falls back to `-WorkDir`, then the current directory. |
+| `architecture` | recommended | Selects the Nsight metric set. **Set it explicitly on anything but Ada** — it defaults to `Ada` when omitted, and other architectures expose a different metric set (check with `gputrace_list_metrics`). |
+| `appArgs` | optional | Base arguments every variant shares; each variant's `args` are appended. |
+| `appTimeoutArgs` | optional | How to tell the application how long it may live, as a template — `{seconds}` is replaced by `appSeconds`. See below. |
+| `appSeconds` | optional | The value substituted into `appTimeoutArgs`. Default 25. Does nothing on its own. |
+| `name`, `description` | optional | Metadata. Not read by any code; write them for the next person. |
 
-`-Profile` accepts a bundled name (resolved under `profiles\`) or a path to any JSON file, so a
-new target is a new profile — never a code change.
+`-Profile` accepts a bundled name (resolved under `profiles\`) or a path to any JSON file.
+`-Exe`, `-AppArgs`, `-WorkDir` and `-AppSeconds` override the profile for one run; the profile is
+the default, not the last word.
 
 **One variant per trace, deliberately.** The traced application must not switch variants per frame
 (`--sweep`): when two variants are numerically close, frames cannot be attributed back to them
 afterwards, and the trace becomes useless for exactly the comparison it was taken for.
+
+### Bringing your own application
+
+Start from `profiles\example.json`, which is a template rather than a runnable target — its
+placeholders are left in on purpose, and the capture stops on the first one and names it.
+
+Four things the tool needs from the application, none of which the field table can express:
+
+1. **It must be able to select a variant from the command line**, or `variants` can only hold one
+   entry — and a single-variant profile gives you a trace, not a comparison.
+2. **It must end on its own.** Nothing here bounds it: there is no watchdog on the application
+   process, so the capture waits for as long as the application runs. If it takes a lifetime flag,
+   say so with `appTimeoutArgs` (for example `"--timeout {seconds}"`); if it terminates by design,
+   leave the field out and the arguments are passed through untouched. Omitting it is fine — the
+   capture warns once that the run length is the application's business.
+3. **It must run unattended.** `ngfx` launches the process directly; nothing can answer a prompt
+   or click a dialog.
+4. **It must not change how shaders are compiled while it is being traced.** Any dump/verbose
+   switch that alters code generation pollutes the trace — turn it off in `appArgs`.
+
+Sanity-check a new profile with `-DryRun`: it prints the exact `ngfx` command line for every
+variant without running anything, which is where a wrong path or a missing flag shows up first.
 
 ## Layout
 

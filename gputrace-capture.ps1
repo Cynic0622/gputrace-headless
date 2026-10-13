@@ -29,6 +29,9 @@
 #     Top Stall data) engages via the real-time-shader-profiler option - see the README for the
 #     full mechanism and the two configuration pitfalls (BOM, per-arch key scoping).
 #   * The exported .xls files are tab-separated text; read them with .\gputrace-report.ps1.
+#   * The application has to end on its own - nothing here bounds it. The profile's appTimeoutArgs
+#     says how to ask for a lifetime (for example "-timeout {seconds}"); a profile that declares
+#     none is traced exactly as written, and the capture then waits as long as the application runs.
 
 param(
     # Required: profile name (resolved under .\profiles) or a path to a profile JSON.
@@ -37,7 +40,7 @@ param(
     [int]$Frames = 60,
     [int]$MetricSetId = 1,          # Ada: 0 = Async Compute Triage, 1 = Throughput Metrics, 2 = Top-Level
     [string]$MetricSetName = 'Throughput Metrics',  # used by -ShaderProfiler, which goes through JSON
-    [int]$AppSeconds = 25,          # how long each application run is allowed to live
+    [int]$AppSeconds = 25,          # seconds handed to the profile's appTimeoutArgs template
     [string]$Exe = '',              # overrides the profile executable
     [string]$AppArgs = '',          # overrides the profile base application arguments
     [string]$OutDir = 'gputrace',
@@ -51,9 +54,9 @@ param(
     # Shader Pipelines must show non-zero samples, or REPRO_INFO must stop saying Disabled).
     [switch]$WarpStateSampling,
     [switch]$DryRun,
-    # Where the target application lives. The profile's own workDir takes precedence (a relative
-    # value there is resolved against the profile file, so a profile can point at a checkout next
-    # to itself); this parameter is the fallback, and the current directory the last resort.
+    # Where the target application lives. Normally left to the profile, whose workDir is resolved
+    # against the profile file so a profile can point at a checkout next to itself; passing this
+    # overrides that, and the current directory is the last resort.
     [string]$WorkDir = '',
     # Nsight Graphics' ngfx.exe, or the directory holding it. Only needed when the automatic
     # search misses - an install on an unusual path, or several versions side by side.
@@ -174,32 +177,50 @@ function Get-ProfileField {
     return $Default
 }
 
-$appPath = $Exe
-$architecture = 'Ada'
-$baseAppArgs = ''
-
-# The profile describes its own target, so its workDir wins over the parameter and a relative
-# value there is resolved against the profile file - not against this script, which no longer
-# sits inside the traced repository. Made absolute here because the elevated relaunch below
-# forwards it verbatim and because the relative exe/outDir below are joined onto it.
+# The profile supplies the defaults, and anything passed explicitly wins - which is what the MCP
+# server relies on when it forwards a caller's overrides. Before this, the profile overwrote -Exe
+# outright and beat -AppSeconds, so both knobs were silently dead on any profile that set them.
 $profileWorkDir = Get-ProfileField $profileData 'workDir' ''
-if ($profileWorkDir -ne '') {
-    if ([System.IO.Path]::IsPathRooted($profileWorkDir)) {
+$profileExe = Get-ProfileField $profileData 'exe' ''
+
+# A profile still carrying the template's placeholders is named here, before any path API touches
+# it: IsPathRooted rejects the angle brackets outright on Windows, so the check has to come first
+# or it surfaces as an unrelated "illegal characters in path".
+$placeholder = @($profileWorkDir, $profileExe) | Where-Object { $_ -match '<[^>]+>' } | Select-Object -First 1
+if ($placeholder) {
+    throw "profile '$Profile' still holds a template placeholder ('$placeholder'). Copy profiles\example.json, fill it in, and pass that file to -Profile."
+}
+
+if ($Exe -ne '') {
+    $appPath = $Exe
+} else {
+    $appPath = $profileExe
+}
+
+# The profile's workDir is resolved against the profile file, not against this script - which no
+# longer sits inside the traced repository - so a profile can point at a checkout next to itself.
+# Made absolute because the elevated relaunch below forwards it verbatim and because the relative
+# exe/outDir below are joined onto it.
+if ($WorkDir -eq '') {
+    if ($profileWorkDir -eq '') {
+        $WorkDir = (Get-Location).Path
+    } elseif ([System.IO.Path]::IsPathRooted($profileWorkDir)) {
         $WorkDir = $profileWorkDir
     } else {
         $WorkDir = Join-Path (Split-Path -Parent $profilePath) $profileWorkDir
     }
-} elseif ($WorkDir -eq '') {
-    $WorkDir = (Get-Location).Path
 }
-$WorkDir = [System.IO.Path]::GetFullPath($WorkDir)
 
-$appPath = Get-ProfileField $profileData 'exe' ''
 $architecture = Get-ProfileField $profileData 'architecture' 'Ada'
 $baseAppArgs = Get-ProfileField $profileData 'appArgs' ''
-if ($profileData.PSObject.Properties['appSeconds']) { $AppSeconds = [int]$profileData.appSeconds }
 if ($AppArgs -ne '') { $baseAppArgs = $AppArgs }
+# -AppSeconds has a non-empty default, so "was it passed explicitly?" needs PSBoundParameters
+# rather than a sentinel value.
+if (-not $PSBoundParameters.ContainsKey('AppSeconds') -and $profileData.PSObject.Properties['appSeconds']) {
+    $AppSeconds = [int]$profileData.appSeconds
+}
 
+$WorkDir = [System.IO.Path]::GetFullPath($WorkDir)
 if (-not [System.IO.Path]::IsPathRooted($appPath)) { $appPath = Join-Path $WorkDir $appPath }
 if (-not (Test-Path -LiteralPath $appPath)) {
     throw "application not found at '$appPath'; build the target first or fix the profile"
@@ -208,8 +229,7 @@ if (-not (Test-Path -LiteralPath $appPath)) {
 $outputDir = if ([System.IO.Path]::IsPathRooted($OutDir)) { $OutDir } else { Join-Path $WorkDir $OutDir }
 
 # The trace targets: one per profile variant. Names become directory names, so they are
-# sanitized here. The app timeout is appended once - every target needs it to bound the run,
-# whatever the app (skip when the app args already carry one).
+# sanitized here.
 $targets = @()
 foreach ($v in @($profileData.variants)) {
     $name = ($v.name -replace '[\\/:*?"<>|]', '_')
@@ -218,10 +238,30 @@ foreach ($v in @($profileData.variants)) {
         Args = ((@($baseAppArgs, $v.args) | Where-Object { $_ }) -join ' ').Trim()
     }
 }
-foreach ($t in $targets) {
-    if ($t.Args -notmatch '--timeout\s') { $t.Args = "$($t.Args) --timeout $AppSeconds".Trim() }
-}
 if ($targets.Count -eq 0) { throw 'no trace targets (empty variants list in the profile)' }
+
+# How the application is asked to stop, if it can be asked at all.
+#
+# This used to be an unconditional "--timeout <n>" appended to every target, which quietly
+# required every traced application to accept that exact flag. Nothing here bounds a run by
+# itself - there is no watchdog on the application process - so an application that ignored the
+# flag ran forever and took the capture with it. The profile now declares the template, and a
+# profile that declares none is left untouched.
+$appTimeoutArgs = Get-ProfileField $profileData 'appTimeoutArgs' ''
+if ($appTimeoutArgs -eq '') {
+    Write-Warning ('profile declares no appTimeoutArgs, so the run length is entirely up to the ' +
+                   'application. Set it - for example "-timeout {seconds}" - if the application ' +
+                   'takes a lifetime flag; the capture waits for the application either way.')
+} else {
+    foreach ($t in $targets) {
+        # The template is a default, not a rule: a target that already spells the flag out itself
+        # is left as written.
+        $flag = ($appTimeoutArgs -split '\s+')[0]
+        if ($flag -and $t.Args -notmatch [regex]::Escape($flag)) {
+            $t.Args = "$($t.Args) $($appTimeoutArgs -replace '\{seconds\}', "$AppSeconds")".Trim()
+        }
+    }
+}
 
 function Get-NgfxArgs {
     param([string]$Name, [string]$AppArgs, [string]$TraceDir)

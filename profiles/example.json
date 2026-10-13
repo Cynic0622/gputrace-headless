@@ -1,0 +1,17 @@
+{
+  "name": "example",
+  "description": "TEMPLATE, not a runnable target. Copy this file to <your-target>.json, replace every <ANGLE-BRACKET> value, then run: .\\gputrace-capture.ps1 -Profile <your-target> -DryRun. The placeholders are left in on purpose - the capture stops on the first one and names it, instead of failing later on a path you never typed.",
+
+  "workDir": "<ABSOLUTE-PATH-TO-YOUR-CHECKOUT>",
+  "exe": "<PATH-TO-YOUR-EXE-RELATIVE-TO-workDir>",
+  "architecture": "<turing|ampere|ada|hopper|blackwell>",
+
+  "appArgs": "<ARGUMENTS-EVERY-VARIANT-SHARES>",
+  "appTimeoutArgs": "<YOUR-LIFETIME-FLAG, e.g. --timeout {seconds} - delete this line if your application takes none>",
+  "appSeconds": 25,
+
+  "variants": [
+    { "name": "variant-a", "args": "<ARGS-THAT-SELECT-VARIANT-A>" },
+    { "name": "variant-b", "args": "<ARGS-THAT-SELECT-VARIANT-B>" }
+  ]
+}

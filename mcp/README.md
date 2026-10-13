@@ -34,8 +34,9 @@ server 默认在上层目录找 CLI；若你把它单独放到别处，设环境
 
 ## 抓取目标（profile）
 
-抓取目标由 profile 描述（`profiles/*.json`）：exe、工作目录、架构、应用参数、变体列表。
-内置 `ntc-benchmark`（Bear 的 decode 三变体）作为完整示例。新应用 = 新 profile 文件，无需改代码。
+抓取目标由 profile 描述（`profiles/*.json`）：exe、工作目录、架构、应用参数、超时参数模板、变体列表。
+内置 `ntc-benchmark`（Bear 的 decode 三变体）作为完整示例，`profiles/example.json` 是待填模板。
+新应用 = 新 profile 文件，无需改代码；接入前先跑 `-DryRun` 自检。
 
 ## 工具
 
