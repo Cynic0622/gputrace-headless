@@ -54,25 +54,18 @@ param(
     # Where the target application lives. The profile's own workDir takes precedence (a relative
     # value there is resolved against the profile file, so a profile can point at a checkout next
     # to itself); this parameter is the fallback, and the current directory the last resort.
-    [string]$WorkDir = ''
+    [string]$WorkDir = '',
+    # Nsight Graphics' ngfx.exe, or the directory holding it. Only needed when the automatic
+    # search misses - an install on an unusual path, or several versions side by side.
+    [string]$NgfxPath = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Find-Ngfx {
-    $candidates = @()
-    foreach ($root in @('D:\NVIDIA Corporation', 'C:\Program Files\NVIDIA Corporation',
-                        'C:\Program Files (x86)\NVIDIA Corporation')) {
-        if (Test-Path $root) {
-            $candidates += Get-ChildItem $root -Recurse -Filter 'ngfx.exe' -ErrorAction SilentlyContinue -Depth 5 |
-                Select-Object -ExpandProperty FullName
-        }
-    }
-    $found = $candidates | Select-Object -First 1
-    if (-not $found) { throw 'ngfx.exe not found; install Nsight Graphics' }
-    return $found
-}
+# ngfx.exe lives wherever Nsight Graphics was installed - see gputrace-common.ps1 for the search
+# order and the -NgfxPath / GPUTRACE_NGFX overrides.
+. (Join-Path $PSScriptRoot 'gputrace-common.ps1')
 
 function Test-Elevated {
     $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
@@ -161,7 +154,7 @@ function Show-NewTraces {
     }
 }
 
-$ngfx = Find-Ngfx
+$ngfx = Find-Ngfx -Explicit $NgfxPath
 
 # A profile is required: it describes the capturable target (exe, work dir, architecture, app
 # args, variants). Names resolve under .\profiles, or pass an absolute/relative JSON path.
@@ -296,6 +289,8 @@ if (-not (Test-Elevated) -and -not (Test-CountersUsable -Ngfx $ngfx -AppPath $ap
         '-WorkDir', (Quote-Argument $WorkDir), '-LogFile', (Quote-Argument $LogFile)
     )
     if ($AppArgs -ne '') { $relaunchArgs += @('-AppArgs', (Quote-Argument $AppArgs)) }
+    # Carried across so the elevated run resolves the same ngfx rather than searching again.
+    if ($NgfxPath -ne '') { $relaunchArgs += @('-NgfxPath', (Quote-Argument $NgfxPath)) }
     if ($ShaderProfiler) { $relaunchArgs += '-ShaderProfiler' }
     if ($MultiPassMetrics) { $relaunchArgs += '-MultiPassMetrics' }
     if ($WarpStateSampling) { $relaunchArgs += '-WarpStateSampling' }

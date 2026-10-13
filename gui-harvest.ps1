@@ -16,6 +16,9 @@ param(
     [int]$Y = 0,
     [int]$DeltaX = 0,
     [int]$DeltaY = 0,
+    # Nsight Graphics' ngfx-ui.exe, or the directory holding it - ngfx.exe's own folder works,
+    # since the two ship side by side. Only needed when the automatic search misses.
+    [string]$NgfxPath = '',
     # Base for a relative -Out. Defaults to the current directory, since the traces and the
     # screenshots live wherever the capture ran, not next to this script.
     [string]$WorkDir = (Get-Location).Path
@@ -23,6 +26,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# ngfx-ui.exe ships beside ngfx.exe, so one discovery covers both - see gputrace-common.ps1.
+. (Join-Path $PSScriptRoot 'gputrace-common.ps1')
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -52,7 +59,7 @@ public static class Win32Focus {
 '@
 Add-Type -TypeDefinition $sig -ErrorAction SilentlyContinue
 
-$uiExe = 'D:\NVIDIA Corporation\Nsight Graphics 2026.1.0\host\windows-desktop-nomad-x64\ngfx-ui.exe'
+$uiExe = Find-NgfxUi -Explicit $NgfxPath
 $stateFile = Join-Path $env:TEMP 'gputrace-gui-harvest-state.txt'
 
 function Get-OurUiProcesses {

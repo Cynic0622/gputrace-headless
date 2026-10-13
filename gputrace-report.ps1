@@ -37,7 +37,10 @@
       2 pipe-budget     sum(alu, fma, xu) <= total instructions
       3 registers       register-file% / warps_active reconstructs a plausible register count
       4 slot-budget     issue-slot utilisation + sum(issue stalls) <= 100%
-      5 peak-bound      the peak implied by the stall sum is >= 12 warps/sub-partition (Ada)
+      5 peak-bound      the peak implied by the stall sum is >= the architecture's warps per
+                        sub-partition. The architecture comes from the capture's own REPRO_INFO
+                        (chip name), so this needs no input; it is skipped, never guessed, when
+                        the chip is unknown. -Architecture overrides.
       6 determinism     two traces of the same arm agree exactly on every count
       7 event-budget    the per-pass timings (D3DPERF_EVENTS) sum to no more than the frame time
                         (FRAME.xls) - two different tables that must agree
@@ -71,6 +74,11 @@ param(
     # Optional: a pipeline-dump CSV from DSH_DUMP_PIPELINES=1, for check 3 to cross-check against.
     [string]$PipelineDump,
     [switch]$Json,
+    # The peak-bound check compares against the architecture's real warp limit, so it needs to know
+    # which GPU produced the trace. That is normally read from the capture's own REPRO_INFO; this
+    # overrides it when the capture carries no provenance or an unrecognised chip. Accepts
+    # turing/ampere/ada/hopper/blackwell, or a raw warps-per-sub-partition count.
+    [string]$Architecture,
     # Base for the relative -Dir / -Compare / -PipelineDump paths. Defaults to the current
     # directory: this script is a standalone reader, so it resolves paths where it is invoked
     # from rather than relative to itself.
@@ -80,11 +88,51 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Ada: 4 sub-partitions per SM, 48 warps per SM -> a peak of 12 warps per sub-partition.
-# PowerShell variable names are case-insensitive, so no local may differ only in case from these.
-$AdaWarpsPerSubPartition = 12
-$AdaSubPartitionsPerSm = 4
-$AdaRegistersPerSm = 65536
+# Architectural constants. Four sub-partitions per SM and 65536 registers per SM have held since
+# Maxwell, so only the warp count varies between the GPUs this runs on - and the peak-bound check
+# below is meaningless without it. PowerShell variable names are case-insensitive, so no local may
+# differ only in case from these.
+$SubPartitionsPerSm = 4
+$RegistersPerSm = 65536
+
+# Warps per sub-partition, keyed by architecture. A wrong entry turns a correct capture into a
+# reported failure, so an unrecognised chip resolves to $null and the check is skipped - never
+# guessed at.
+$ArchitectureWarps = [ordered]@{
+    turing    = 8    # 32 warps per SM
+    ampere    = 12   # GA10x, 48 warps per SM
+    ada       = 12   # 48 warps per SM
+    hopper    = 16   # 64 warps per SM
+    blackwell = 16   # 64 warps per SM
+}
+
+# Resolves warps-per-sub-partition from the chip the capture recorded in REPRO_INFO ("Chip Name":
+# AD104, GA102, GH100, GB202, TU117, ...). -Architecture overrides, for a capture that carries no
+# REPRO_INFO or a chip the table does not know.
+function Get-WarpsPerSubPartition {
+    param([string]$Chip, [string]$Architecture)
+
+    if ($Architecture) {
+        $key = $Architecture.Trim().ToLowerInvariant()
+        if ($ArchitectureWarps.Contains($key)) { return $ArchitectureWarps[$key] }
+        $raw = 0
+        if ([int]::TryParse($Architecture, [ref]$raw) -and $raw -gt 0) { return $raw }
+        throw "-Architecture '$Architecture' is not one of $($ArchitectureWarps.Keys -join '/'), nor a warp count"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Chip)) { return $null }
+    $name = $Chip.Trim().ToUpperInvariant()
+
+    # GA100 is the datacentre Ampere part, with 64 warps per SM where the consumer GA10x has 48.
+    if ($name.StartsWith('GA100')) { return 16 }
+
+    if ($name.StartsWith('TU')) { return $ArchitectureWarps['turing'] }
+    if ($name.StartsWith('GA')) { return $ArchitectureWarps['ampere'] }
+    if ($name.StartsWith('AD')) { return $ArchitectureWarps['ada'] }
+    if ($name.StartsWith('GH')) { return $ArchitectureWarps['hopper'] }
+    if ($name.StartsWith('GB')) { return $ArchitectureWarps['blackwell'] }
+    return $null
+}
 
 # Issue-stall reasons. Names come from the trace; a missing one is simply not reported.
 $stallNames = @(
@@ -369,6 +417,11 @@ function Read-PipelineRegisters {
 function Test-Trace {
     param($Trace, $PipelineRegisters, $ReferenceTrace)
 
+    # Which GPU produced this trace decides the architectural peak the stall counters are scaled
+    # against. The capture records its own chip, so this normally needs no user input at all.
+    $chip = if ($Trace.Repro.Contains('Chip Name')) { $Trace.Repro['Chip Name'] } else { $null }
+    $warpsPerSubPartition = Get-WarpsPerSubPartition -Chip $chip -Architecture $Architecture
+
     $checks = New-Object System.Collections.ArrayList
 
     # 1. Warp width. The hardware guarantees 32 threads per warp, so this ratio has exactly one
@@ -408,8 +461,8 @@ function Test-Trace {
     if ([double]::IsNaN($warps) -or [double]::IsNaN($regPct) -or $warps -le 0) {
         Add-Check $checks 'registers' 'SKIP' 'warps_active / register occupancy not in this trace'
     } else {
-        $derived = $regPct * $AdaRegistersPerSm / (100.0 * $warps * 32.0)
-        # Ada allocates registers in multiples of 8 per thread.
+        $derived = $regPct * $RegistersPerSm / (100.0 * $warps * 32.0)
+        # Registers are allocated in multiples of 8 per thread.
         $nearest = [Math]::Round($derived / 8.0) * 8.0
         $errorPt = [Math]::Abs($derived - $nearest)
         # When a pipeline dump is supplied, the reconstruction must also land on a count the driver
@@ -445,7 +498,7 @@ function Test-Trace {
     if ([double]::IsNaN($ipc)) {
         Add-Check $checks 'slot-budget' 'SKIP' 'instructions-per-cycle not in this trace'
     } else {
-        $util = 100.0 * $ipc / $AdaSubPartitionsPerSm
+        $util = 100.0 * $ipc / $SubPartitionsPerSm
         if (-not $haveStalls) {
             Add-Check $checks 'slot-budget' 'SKIP' ("issue-slot utilisation {0:F1}%, no stall counters in this trace" -f $util)
         } elseif (($util + $stallSum) -le 100.0) {
@@ -458,15 +511,18 @@ function Test-Trace {
     # 5. Peak bound. Stalled warps cannot outnumber active warps, and stalled warps = sum(pct) * P/100
     #    for whatever peak P the counter uses. So P is bounded above by active/stalled, and that bound
     #    must sit at or above the architectural peak - it lands just above it when the scaling is right.
-    if (-not [double]::IsNaN($warps) -and $haveStalls -and $stallSum -gt 0) {
-        # Named apart from $AdaWarpsPerSubPartition on purpose: a same-spelling-different-case local
-        # would shadow the constant, since PowerShell variable names are case-insensitive.
-        $activePerSubPartition = $warps / $AdaSubPartitionsPerSm
+    if ($null -eq $warpsPerSubPartition) {
+        # Skipped rather than assumed: judging the scaling against the wrong architecture's peak
+        # reports a false failure on a capture that is perfectly good.
+        $which = if ($chip) { $chip } else { 'not recorded' }
+        Add-Check $checks 'peak-bound' 'SKIP' ("unknown architecture (chip '{0}'); pass -Architecture to check this" -f $which)
+    } elseif (-not [double]::IsNaN($warps) -and $haveStalls -and $stallSum -gt 0) {
+        $activePerSubPartition = $warps / $SubPartitionsPerSm
         $impliedPeak = 100.0 * $activePerSubPartition / $stallSum
-        if ($impliedPeak -ge $AdaWarpsPerSubPartition) {
-            Add-Check $checks 'peak-bound' 'PASS' ("implied peak {0:F2} warp/sub-partition >= architectural {1}" -f $impliedPeak, $AdaWarpsPerSubPartition)
+        if ($impliedPeak -ge $warpsPerSubPartition) {
+            Add-Check $checks 'peak-bound' 'PASS' ("implied peak {0:F2} warp/sub-partition >= architectural {1} (chip {2})" -f $impliedPeak, $warpsPerSubPartition, $chip)
         } else {
-            Add-Check $checks 'peak-bound' 'FAIL' ("implied peak {0:F2} warp/sub-partition < architectural {1}" -f $impliedPeak, $AdaWarpsPerSubPartition)
+            Add-Check $checks 'peak-bound' 'FAIL' ("implied peak {0:F2} warp/sub-partition < architectural {1} (chip {2})" -f $impliedPeak, $warpsPerSubPartition, $chip)
         }
     } else {
         Add-Check $checks 'peak-bound' 'SKIP' 'needs both stall counters and warps_active'
@@ -798,8 +854,9 @@ if ($Compare) {
 
     Write-Host ''
     Write-Host '--- capture provenance (REPRO_INFO) ---'
-    $provenanceKeys = @('Warp State Sampling Interval', 'Metric Set', 'Multi-Pass Metrics',
-                        'Real-Time Shader Profiler', 'GPU Clocks', 'V-Sync Mode', 'Driver Version')
+    $provenanceKeys = @('Device Name', 'Chip Name', 'Warp State Sampling Interval', 'Metric Set',
+                        'Multi-Pass Metrics', 'Real-Time Shader Profiler', 'GPU Clocks',
+                        'V-Sync Mode', 'Driver Version')
     foreach ($name in $provenanceKeys) {
         $cells = ($labels | ForEach-Object {
             if ($traces[$_].Repro.Contains($name)) { '{0,12}' -f $traces[$_].Repro[$name] }

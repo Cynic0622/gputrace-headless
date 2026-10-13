@@ -14,6 +14,12 @@ as data.
 - **PowerShell 5.1** — the only runtime. No Node, no Python, no packages to install.
 - A traced application that takes CLI arguments (see [Profiles](#profiles)).
 
+`ngfx.exe` and `ngfx-ui.exe` are found automatically: an explicit path first (`-NgfxPath`, or
+`$env:GPUTRACE_NGFX`), then `PATH`, then the usual install roots and every fixed drive. Nsight
+Graphics installs under a version-stamped directory on whatever drive the user picked, so the
+search is deliberately not a fixed path list — and `-NgfxPath` is the escape hatch when even that
+misses.
+
 **Counter access.** NVIDIA hands GPU performance counters only to an elevated process on GeForce,
 so `ngfx` connects and then fails with `GPU Performance Counters unavailable`. Two ways out:
 
@@ -72,7 +78,7 @@ about Nsight Graphics itself:
 | --- | --- |
 | `workDir` | The target's checkout. **Relative values resolve against the profile file**, so a profile can point at a tree next to itself. Falls back to `-WorkDir`, then the current directory. |
 | `exe` | Relative to `workDir`. |
-| `architecture` | Selects the Nsight metric set (`Ada` measured; other architectures may expose a different metric set — check with `gputrace_list_metrics`). |
+| `architecture` | Selects the Nsight metric set. **Set it explicitly on anything but Ada** — it defaults to `Ada` when omitted, and other architectures expose a different metric set (check with `gputrace_list_metrics`). |
 | `appArgs` | Base arguments; each variant's `args` are appended. |
 | `variants` | One trace per entry. **Names become directory names**, so keep them filesystem-safe. |
 
@@ -89,6 +95,7 @@ afterwards, and the trace becomes useless for exactly the comparison it was take
 | --- | --- |
 | `gputrace-capture.ps1` | Captures one GPU Trace per profile variant with `ngfx`, unattended, and auto-exports the metrics. |
 | `gputrace-report.ps1` | Reads those exports, validates them, compares traces. The analysis engine. |
+| `gputrace-common.ps1` | Shared discovery of `ngfx.exe` / `ngfx-ui.exe`. Dot-sourced by the two scripts above and by `gui-harvest.ps1`. |
 | `pipeline-dump-report.ps1` | Reads the `DSH_DUMP_PIPELINES=1` dump: registers, binary size, stack size. |
 | `gui-harvest.ps1` | Screenshots and drives the Nsight Graphics UI for the data only it renders. |
 | `crop-png.ps1` | Crops a harvested screenshot to the panel that matters. |
@@ -168,7 +175,7 @@ trace and treat it as good.
 | `pipe-budget` | `alu + fma + xu <= total` instructions. |
 | `registers` | `register-file% / warps_active` reconstructs a register count, which must land on a real allocation — and, with `-PipelineDump`, must match what the driver reports through `VK_KHR_pipeline_executable_properties`, a completely different API. |
 | `slot-budget` | issue-slot utilisation + stalled fraction `<= 100%`. |
-| `peak-bound` | The peak implied by the stall sum (`active / sum(stalls)`) is `>= 12` warps per sub-partition, Ada's architectural value. It lands just above 12 when the scaling is right. |
+| `peak-bound` | The peak implied by the stall sum (`active / sum(stalls)`) is `>=` the architecture's warps per sub-partition — 8 on Turing, 12 on Ampere GA10x and Ada, 16 on GA100/Hopper/Blackwell. It lands just above the value when the scaling is right. The architecture is read from the capture's own `REPRO_INFO` (`Chip Name`), so it needs no input; an unrecognised chip **skips** the check rather than guessing, because judging against the wrong architecture reports a false failure. `-Architecture` overrides. |
 | `determinism` | Two traces of the same variant agree exactly on every `count` metric. |
 | `event-budget` | The per-pass timings sum to no more than the frame time — two different tables that must agree. |
 | `sampling-provenance` | `REPRO_INFO` records whether warp state sampling was enabled; only sampling-enabled traces carry GUI-comparable stall data at all. |

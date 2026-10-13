@@ -101,6 +101,7 @@ function Invoke-ToolCapture {
     if ($toolInput.appArgs) { $cliArgs += @('-AppArgs', $toolInput.appArgs) }
     if ($toolInput.outDir) { $cliArgs += @('-OutDir', $toolInput.outDir) }
     if ($toolInput.workDir) { $cliArgs += @('-WorkDir', $toolInput.workDir) }
+    if ($toolInput.ngfxPath) { $cliArgs += @('-NgfxPath', $toolInput.ngfxPath) }
     $saf = 300; if ($toolInput.startAfterFrames) { $saf = $toolInput.startAfterFrames }
     $fr = 8; if ($toolInput.frames) { $fr = $toolInput.frames }
     $as = 20; if ($toolInput.appSeconds) { $as = $toolInput.appSeconds }
@@ -213,6 +214,7 @@ $TOOLS = @(
                appArgs = @{ type = 'string'; description = 'Overrides the base application arguments.' }
                outDir = @{ type = 'string'; description = 'Output directory root, relative to the profile workDir (default gputrace).' }
                workDir = @{ type = 'string'; description = 'Overrides the profile workDir: the directory the application is launched in.' }
+               ngfxPath = @{ type = 'string'; description = 'ngfx.exe or its directory. Only needed when the automatic Nsight Graphics search misses (unusual install path, several versions).' }
                startAfterFrames = @{ type = 'number'; description = 'Frames to skip before capturing (default 300).' }
                frames = @{ type = 'number'; description = 'Frames to capture (default 8).' }
                appSeconds = @{ type = 'number'; description = 'Application lifetime bound in seconds (default 20).' }
