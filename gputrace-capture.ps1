@@ -263,6 +263,20 @@ if ($appTimeoutArgs -eq '') {
     }
 }
 
+# Environment variables the profile wants the target to see, applied to the traced process below.
+#
+# The usual reason to declare one is to force a diagnostic switch OFF: a switch that changes how
+# the driver compiles shaders would otherwise pollute the trace, and the point of a trace is to see
+# the code as it normally compiles. Declared by the profile rather than hardcoded here, so this
+# tool never has to know any application's private variable names.
+$profileEnvPairs = @()
+$profileEnv = Get-ProfileField $profileData 'env' $null
+if ($null -ne $profileEnv) {
+    foreach ($property in $profileEnv.PSObject.Properties) {
+        $profileEnvPairs += [pscustomobject]@{ Name = $property.Name; Value = [string]$property.Value }
+    }
+}
+
 function Get-NgfxArgs {
     param([string]$Name, [string]$AppArgs, [string]$TraceDir)
 
@@ -297,6 +311,9 @@ if ($DryRun) {
     Write-Host "ngfx:    $ngfx"
     Write-Host "working: $WorkDir"
     Write-Host "output:  $outputDir"
+    if ($profileEnvPairs.Count -gt 0) {
+        Write-Host ("env:     {0}" -f (($profileEnvPairs | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ' '))
+    }
     foreach ($t in $targets) {
         Write-Host ''
         Write-Host "$($t.Name) -> $(Join-Path $outputDir $t.Name)"
@@ -356,8 +373,13 @@ if (-not (Test-Elevated) -and -not (Test-CountersUsable -Ngfx $ngfx -AppPath $ap
 Start-Transcript -Path $LogFile -Force | Out-Null
 $startedAt = Get-Date
 
-# Timing runs must not carry the pipeline capture flags, which can change how the driver compiles.
-$env:DSH_DUMP_PIPELINES = '0'
+# Applied here rather than earlier on purpose: whichever process actually runs the capture - this
+# one, or the elevated relaunch above - sets the variables for its own children. Timing runs must
+# not carry the target's pipeline capture flags, which can change how the driver compiles.
+foreach ($pair in $profileEnvPairs) {
+    Set-Item -Path "Env:$($pair.Name)" -Value $pair.Value
+    Write-Host ("env: {0}={1}" -f $pair.Name, $pair.Value)
+}
 
 $failed = 0
 try {

@@ -71,7 +71,7 @@ param(
     # Also summarise GPUTRACE_REGIMES.xls: the same hardware metrics split per named regime
     # (benchmark pass vs UI vs present), which is what attributes throughput to the decode pass.
     [switch]$Regimes,
-    # Optional: a pipeline-dump CSV from DSH_DUMP_PIPELINES=1, for check 3 to cross-check against.
+    # Optional: a pipeline-dump CSV (see pipeline-dump-report.ps1), for check 3 to cross-check against.
     [string]$PipelineDump,
     [switch]$Json,
     # The peak-bound check compares against the architecture's real warp limit, so it needs to know
@@ -398,7 +398,7 @@ function Add-Check {
     $null = $Checks.Add([pscustomobject]@{ Check = $Name; Status = $Status; Detail = $Detail })
 }
 
-# Reads DSH_DUMP_PIPELINES output so check 3 can cross-check the register count against a completely
+# Reads a pipeline dump so check 3 can cross-check the register count against a completely
 # different API (VK_KHR_pipeline_executable_properties) rather than only against itself.
 function Read-PipelineRegisters {
     param([string]$Path)

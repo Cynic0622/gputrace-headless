@@ -1,4 +1,4 @@
-# Summarizes a pipeline dump produced by running the application with DSH_DUMP_PIPELINES=1.
+# Summarizes a pipeline dump produced by running the application with its own pipeline-dump switch on.
 #
 # The engine writes one row per driver statistic reported through
 # VK_KHR_pipeline_executable_properties. This script pivots the ones that matter for shader work
@@ -29,7 +29,7 @@ function Read-Dump {
 
     $csv = Join-Path $Path 'pipelines.csv'
     if (-not (Test-Path -LiteralPath $csv)) {
-        throw "no pipelines.csv under '$Path' - run the app with DSH_DUMP_PIPELINES=1 first"
+        throw "no pipelines.csv under '$Path' - run the application with its pipeline-dump switch on first"
     }
     return Import-Csv -LiteralPath $csv
 }

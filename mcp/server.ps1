@@ -209,7 +209,7 @@ $TOOLS = @(
        inputSchema = @{
            type = 'object'
            properties = @{
-               profile = @{ type = 'string'; description = 'Required. Profile name (resolved under profiles\) or a path to a profile JSON. Defines exe, workDir, app args and the variants to trace.' }
+               profile = @{ type = 'string'; description = 'Required. Profile name (resolved under profiles\) or a path to a profile JSON. Defines exe, workDir, app args, the environment variables the target must see, and the variants to trace.' }
                exe = @{ type = 'string'; description = 'Overrides the profile executable path.' }
                appArgs = @{ type = 'string'; description = 'Overrides the base application arguments.' }
                outDir = @{ type = 'string'; description = 'Output directory root, relative to the profile workDir (default gputrace).' }

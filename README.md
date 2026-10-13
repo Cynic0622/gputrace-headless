@@ -47,8 +47,8 @@ before the first real capture.
 .\gputrace-report.ps1 -Json -Validate -Dir gputrace\arm1     # for an agent to parse
 
 # 3. Registers / instruction footprint per variant, from a different API entirely.
-#    Run the application once with its own pipeline-dump switch on first - for the bundled
-#    profile's application that is DSH_DUMP_PIPELINES=1 - then:
+#    Run the application once with its own pipeline-dump switch ON - the bundled profile's `env`
+#    field holds that switch off during traces, so override it for this run - then:
 .\pipeline-dump-report.ps1
 
 # 4. Only when the counters themselves matter: one GPU Trace per variant.
@@ -91,11 +91,19 @@ no code changes to add one.
 | `appArgs` | optional | Base arguments every variant shares; each variant's `args` are appended. |
 | `appTimeoutArgs` | optional | How to tell the application how long it may live, as a template — `{seconds}` is replaced by `appSeconds`. See below. |
 | `appSeconds` | optional | The value substituted into `appTimeoutArgs`. Default 25. Does nothing on its own. |
+| `env` | optional | Environment variables the traced application must see, as `{ "NAME": "value" }`. Normally empty. See below. |
 | `name`, `description` | optional | Metadata. Not read by any code; write them for the next person. |
 
 `-Profile` accepts a bundled name (resolved under `profiles\`) or a path to any JSON file.
 `-Exe`, `-AppArgs`, `-WorkDir` and `-AppSeconds` override the profile for one run; the profile is
 the default, not the last word.
+
+**`env` exists to keep a trace honest.** A diagnostic switch that changes how the driver compiles
+shaders — dumping pipeline statistics, forcing debug info, disabling optimizations — makes the trace
+describe code that does not normally exist. `env` is where the profile names those switches so they
+are forced off for the run. It is a map rather than a single flag because which variables a target
+exposes is the target's business, and keeping the names in the profile is what stops them from
+having to appear in this tool.
 
 **One variant per trace, deliberately.** The traced application must not switch variants per frame
 (`--sweep`): when two variants are numerically close, frames cannot be attributed back to them
@@ -118,7 +126,7 @@ Four things the tool needs from the application, none of which the field table c
 3. **It must run unattended.** `ngfx` launches the process directly; nothing can answer a prompt
    or click a dialog.
 4. **It must not change how shaders are compiled while it is being traced.** Any dump/verbose
-   switch that alters code generation pollutes the trace — turn it off in `appArgs`.
+   switch that alters code generation pollutes the trace — name it in `env` and force it to `"0"`.
 
 Sanity-check a new profile with `-DryRun`: it prints the exact `ngfx` command line for every
 variant without running anything, which is where a wrong path or a missing flag shows up first.
@@ -130,7 +138,7 @@ variant without running anything, which is where a wrong path or a missing flag 
 | `gputrace-capture.ps1` | Captures one GPU Trace per profile variant with `ngfx`, unattended, and auto-exports the metrics. |
 | `gputrace-report.ps1` | Reads those exports, validates them, compares traces. The analysis engine. |
 | `gputrace-common.ps1` | Shared discovery of `ngfx.exe` / `ngfx-ui.exe`. Dot-sourced by the two scripts above and by `gui-harvest.ps1`. |
-| `pipeline-dump-report.ps1` | Reads the `DSH_DUMP_PIPELINES=1` dump: registers, binary size, stack size. |
+| `pipeline-dump-report.ps1` | Reads a pipeline dump (`pipelines.csv`): registers, binary size, stack size. |
 | `gui-harvest.ps1` | Screenshots and drives the Nsight Graphics UI for the data only it renders. |
 | `crop-png.ps1` | Crops a harvested screenshot to the panel that matters. |
 | `keep-awake.ps1` | Stops the machine sleeping mid-capture. |
