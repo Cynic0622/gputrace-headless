@@ -139,14 +139,19 @@ variant without running anything, which is where a wrong path or a missing flag 
 | `gputrace-report.ps1` | Reads those exports, validates them, compares traces. The analysis engine. |
 | `gputrace-common.ps1` | Shared discovery of `ngfx.exe` / `ngfx-ui.exe`. Dot-sourced by the two scripts above and by `gui-harvest.ps1`. |
 | `pipeline-dump-report.ps1` | Reads a pipeline dump (`pipelines.csv`): registers, binary size, stack size. |
-| `gui-harvest.ps1` | Screenshots and drives the Nsight Graphics UI for the data only it renders. |
+| `gui-harvest.ps1` | Screenshots and drives the Nsight Graphics UI. `-Action export` pulls the per-source-line attribution out as CSV — the one thing with no CLI front end. |
 | `crop-png.ps1` | Crops a harvested screenshot to the panel that matters. |
 | `keep-awake.ps1` | Stops the machine sleeping mid-capture. |
 | `unlock-counters.ps1` | One-time: opens counter access to all users, so traces never need UAC again. |
+| `ngfx-extract-protos.py` | Recovers every `.proto` Nsight links into its binaries, so the capture format and the replayer's RPC can be read. See `schemas/`. |
 | `mcp\server.ps1` | MCP server (stdio) wrapping the CLI for an LLM agent. See [`mcp\README.md`](mcp/README.md). |
 
 `mcp\README.md` covers the MCP installation, the client config snippets, the tool reference and
 the accuracy contract each response carries.
+
+`docs\nsight-gputrace-internals.md` maps what is reachable from the CLI and what is not: the
+capture container format, the per-PC attribution schema, the replayer's RPC transport, and why
+the GUI-only numbers cannot be exported. Read it before assuming something is out of reach.
 
 ## What was learned building this (the headless data map)
 
