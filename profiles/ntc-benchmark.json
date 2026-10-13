@@ -1,0 +1,14 @@
+{
+  "name": "ntc-benchmark",
+  "description": "Reference profile: a Vulkan micro-benchmark that decodes a neural-compressed texture in a fragment shader, traced once per decode variant.",
+  "workDir": "..\\..\\Bear",
+  "exe": "build\\bin\\Release\\Sandbox.exe",
+  "architecture": "Ada",
+  "appSeconds": 25,
+  "appArgs": "--ntc-benchmark --model Suzanne --samples 1000000",
+  "variants": [
+    { "name": "arm0", "args": "--arm 0" },
+    { "name": "arm1", "args": "--arm 1" },
+    { "name": "arm2", "args": "--arm 2" }
+  ]
+}

@@ -1,0 +1,6 @@
+* text=auto
+
+# Windows tooling: the scripts are CRLF, the docs are LF.
+*.ps1 text eol=crlf
+*.md text eol=lf
+*.json text eol=lf

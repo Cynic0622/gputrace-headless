@@ -1,0 +1,20 @@
+# Capture output: traces, exports and the pipeline dump all land in the traced repo, next to
+# wherever the capture ran. Never commit them.
+gputrace/
+gputrace-*/
+pipeline-dump/
+pipeline-dump-*/
+ncu/
+gui/
+
+# Nsight Graphics artifacts
+*.ngfx-gputrace
+*.xls
+*.layout
+
+# Editor / OS
+.vscode/
+.idea/
+*.user
+Thumbs.db
+Desktop.ini

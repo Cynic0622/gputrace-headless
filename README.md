@@ -1,0 +1,217 @@
+# gputrace-headless
+
+Headless capture and analysis of NVIDIA Nsight Graphics **GPU Trace** data — no GUI, no
+screenshots, no hand-copying numbers off a panel. A PowerShell CLI does the work; a thin MCP
+server exposes the same engine to an LLM agent.
+
+The point is not only automation. It is that **every number this tool reports is labelled with
+how far it can be trusted**, and a capture that fails validation is refused rather than returned
+as data.
+
+## Requirements
+
+- **Windows** with **Nsight Graphics** installed (developed and measured against 2026.1).
+- **PowerShell 5.1** — the only runtime. No Node, no Python, no packages to install.
+- A traced application that takes CLI arguments (see [Profiles](#profiles)).
+
+**Counter access.** NVIDIA hands GPU performance counters only to an elevated process on GeForce,
+so `ngfx` connects and then fails with `GPU Performance Counters unavailable`. Two ways out:
+
+- **Permanent:** NVIDIA Control Panel → Developer → Manage GPU Performance Counters → "Allow all
+  users". On drivers where the legacy registry key still applies, `unlock-counters.ps1` sets
+  `RmProfilingAdminOnly=0` instead — note that the driver only honours it after the next
+  driver reload or reboot.
+- **Per run:** `gputrace-capture.ps1` probes first and relaunches itself through UAC when needed.
+  One prompt covers all variants, and the script transcribes the elevated run back to your console
+  (an elevated process otherwise disappears with its console).
+
+## Quick start
+
+```powershell
+# 1. Capture. One trace per variant, warp-state sampling on, all metrics auto-exported.
+.\gputrace-capture.ps1 -Profile ntc-benchmark
+
+# 2. Read, validate, compare.
+.\gputrace-report.ps1 -Validate -Compare gputrace\arm0,gputrace\arm1,gputrace\arm2
+.\gputrace-report.ps1 -Json -Validate -Dir gputrace\arm1     # for an agent to parse
+
+# 3. Registers / instruction footprint per variant, from a different API entirely.
+#    Run the app once with DSH_DUMP_PIPELINES=1 first, then:
+.\pipeline-dump-report.ps1
+
+# 4. Only when the counters themselves matter: one GPU Trace per variant.
+#    -MultiPassMetrics adds the 16-reason counter stall breakdown.
+.\gputrace-capture.ps1 -Profile ntc-benchmark -MultiPassMetrics
+
+# 5. Read the per-variant counter breakdown.
+.\gputrace-report.ps1 -Validate -Regimes -Compare gputrace\arm0,gputrace\arm1
+```
+
+## Profiles
+
+A profile is a JSON file describing one capturable target — everything the tool needs that is not
+about Nsight Graphics itself:
+
+```json
+{
+  "name": "ntc-benchmark",
+  "description": "What this target is, for a human reading the file later.",
+  "workDir": "..\\..\\Bear",
+  "exe": "build\\bin\\Release\\Sandbox.exe",
+  "architecture": "Ada",
+  "appSeconds": 25,
+  "appArgs": "--ntc-benchmark --model Suzanne --samples 1000000",
+  "variants": [
+    { "name": "arm0", "args": "--arm 0" },
+    { "name": "arm1", "args": "--arm 1" }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `workDir` | The target's checkout. **Relative values resolve against the profile file**, so a profile can point at a tree next to itself. Falls back to `-WorkDir`, then the current directory. |
+| `exe` | Relative to `workDir`. |
+| `architecture` | Selects the Nsight metric set (`Ada` measured; other architectures may expose a different metric set — check with `gputrace_list_metrics`). |
+| `appArgs` | Base arguments; each variant's `args` are appended. |
+| `variants` | One trace per entry. **Names become directory names**, so keep them filesystem-safe. |
+
+`-Profile` accepts a bundled name (resolved under `profiles\`) or a path to any JSON file, so a
+new target is a new profile — never a code change.
+
+**One variant per trace, deliberately.** The traced application must not switch variants per frame
+(`--sweep`): when two variants are numerically close, frames cannot be attributed back to them
+afterwards, and the trace becomes useless for exactly the comparison it was taken for.
+
+## Layout
+
+| Script | Role |
+| --- | --- |
+| `gputrace-capture.ps1` | Captures one GPU Trace per profile variant with `ngfx`, unattended, and auto-exports the metrics. |
+| `gputrace-report.ps1` | Reads those exports, validates them, compares traces. The analysis engine. |
+| `pipeline-dump-report.ps1` | Reads the `DSH_DUMP_PIPELINES=1` dump: registers, binary size, stack size. |
+| `gui-harvest.ps1` | Screenshots and drives the Nsight Graphics UI for the data only it renders. |
+| `crop-png.ps1` | Crops a harvested screenshot to the panel that matters. |
+| `keep-awake.ps1` | Stops the machine sleeping mid-capture. |
+| `unlock-counters.ps1` | One-time: opens counter access to all users, so traces never need UAC again. |
+| `mcp\server.ps1` | MCP server (stdio) wrapping the CLI for an LLM agent. See [`mcp\README.md`](mcp/README.md). |
+
+`mcp\README.md` covers the MCP installation, the client config snippets, the tool reference and
+the accuracy contract each response carries.
+
+## What was learned building this (the headless data map)
+
+**Warp state sampling — the GUI "Top Stall" table's data source — is ON by default in the GUI and
+OFF from the CLI; the switch is the real-time-shader-profiler option.** Evidence trail:
+
+- The full GPU Trace activity option table lives inside `WarpVizPlugin.dll` (offset ~8.45M): 37
+  options including `real-time-shader-profiler`, `pc-samples-per-pm-interval-per-sm`,
+  `pm-bandwidth-limit`, `lock-gpu-clocks` (base/boost — fixes the clock-comparability gap), and
+  `hes-enabled`. The option help text says the real-time shader profiler is "collected via a
+  high-speed sampling profiler in the SM hardware" and that **when disabled, a more detailed list
+  of SM and L1TEX perf counters is collected instead** — exactly the sampled-vs-counter split
+  measured between GUI and CLI captures.
+- With `--real-time-shader-profiler`, the session INFO line reports
+  `Warp State Sampling Interval = 1024` — identical to GUI captures (the CLI default echo is 16).
+  Without it, captures show "0 Samples" in the GUI's Shader Pipelines view.
+- Two config-file pitfalls, both now fixed in `gputrace-capture.ps1`: (1) Windows PowerShell's
+  `Set-Content -Encoding UTF8` writes a BOM, which ngfx's config parser silently rejects — the
+  config must be written BOM-free; (2) the per-arch config only honours architecture-specific keys
+  (metric-set-name / metric-set-id) — general options like multi-pass or the RTS profiler are
+  silently ignored there and must be CLI flags.
+
+The working recipe:
+
+```powershell
+ngfx --activity "GPU Trace Profiler" ... --metric-set-id 1 --multi-pass-metrics --real-time-shader-profiler
+```
+
+**The per-pass timing breakdown was always in the export.** `D3DPERF_EVENTS.xls` is one row per
+named event, one ms column per traced frame — the pass/draw split, no GUI needed.
+`gputrace-report.ps1` reads it, plus `REPRO_INFO.xls` (capture provenance) and, with `-Regimes`,
+`GPUTRACE_REGIMES.xls`. Regimes layout: header row, then metric names in blocks of exactly
+`<frame-count>` columns; rows cycle the regime names, row 0 carries a whole-frame-per-column series
+and later rows repeat one frame's value across the block — either column of a repeated row gives
+the same value, and the report takes the first.
+
+**Nsight Compute cannot profile this class of workload.** It injects fine but matches zero
+launches when the work runs as a fragment shader in a Vulkan draw: ncu is a CUDA/compute profiler.
+Keep it for genuine compute-kernel work only.
+
+**A locked-down desktop fights synthetic input.** Security software can deny `SetCursorPos`,
+`MoveWindow` and `SC_MAXIMIZE`, and pin the cursor at a fixed pixel; `SendInput` clicks then work
+only there and `SendKeys` only reaches whatever is foreground. The GUI harvest therefore prefers:
+spawn our own UI instance (`--shared-instance-key` so the single-instance handshake does not
+forward the request to the user's instance and exit), read what it shows, screenshot and crop, and
+only navigate when the keyboard focus actually sits on the app.
+
+## The evidence contract
+
+`gputrace-report.ps1` labels every metric, because the numbers are not equally trustworthy:
+
+| Class | Meaning | How it is verified |
+| --- | --- | --- |
+| `count` | A raw event count. | Two independent traces of the same work must agree **exactly**. |
+| `invariant` | A physical constant the hardware guarantees. | Warp width is 32. It proves the counters are scaled correctly. |
+| `ratio` | A ratio with a known denominator. | Stable across independent traces to ~0.1%. |
+| `rate` | A per-cycle average. | Numerator is a count, denominator is elapsed cycles, so it **moves with the SM clock**. |
+| `peak-normalised` | A rate against an assumed peak. | Internally checkable; **not** guaranteed to match another tool's definition. |
+
+## The validation checks
+
+`-Validate` runs eight checks and exits non-zero when one fails, so a script cannot read a broken
+trace and treat it as good.
+
+| Check | What it proves |
+| --- | --- |
+| `warp-width` | threads-per-instruction is exactly 32. If not, nothing else is scaled right. |
+| `pipe-budget` | `alu + fma + xu <= total` instructions. |
+| `registers` | `register-file% / warps_active` reconstructs a register count, which must land on a real allocation — and, with `-PipelineDump`, must match what the driver reports through `VK_KHR_pipeline_executable_properties`, a completely different API. |
+| `slot-budget` | issue-slot utilisation + stalled fraction `<= 100%`. |
+| `peak-bound` | The peak implied by the stall sum (`active / sum(stalls)`) is `>= 12` warps per sub-partition, Ada's architectural value. It lands just above 12 when the scaling is right. |
+| `determinism` | Two traces of the same variant agree exactly on every `count` metric. |
+| `event-budget` | The per-pass timings sum to no more than the frame time — two different tables that must agree. |
+| `sampling-provenance` | `REPRO_INFO` records whether warp state sampling was enabled; only sampling-enabled traces carry GUI-comparable stall data at all. |
+
+The checks earn their keep: `determinism` first failed because `sm__inst_executed.avg.per_cycle_elapsed`
+and `warps_active` were labelled `count` when they are per-cycle averages. The counts were identical;
+the per-cycle figures differed by 1.8% — the two runs had run at slightly different SM clocks. That
+is now its own evidence class.
+
+## What cannot be measured this way
+
+**Nsight's GUI stall table is not reproducible from an export.** `Top Stall #1/#2/#3` and
+`Dependency-Attributed Samples` come from warp-state sampling stored inside the `.ngfx-gputrace`
+container. On Nsight 2026 that container is a binary `WRPV` blob — confirmed by reading
+[nsight-graphics-mcp](https://github.com/elliotttate/nsight-graphics-mcp), which gives up on WRPV
+the same way and points at the auto-export folder. Enabling multi-pass does **not** change the
+GUI's numbers, which confirms the two are different quantities rather than two views of one. On
+one measured variant the GUI reported `LGTHR 28% / LGSB 19% / NOTSEL 19%` where the counter-based
+figures gave `NOTSEL 42% / MATHPT 34% / LGSB 3.4%`. **Compare directions, never absolute values.**
+Per-instruction and per-source-line attribution lives in the same container, so it needs the GUI
+(use `gui-harvest.ps1`).
+
+**Two stall metrics are pipe-qualified.** `long_scoreboard_pipe_l1tex` is long-scoreboard on the
+L1TEX pipe only, and `mio_throttle_pipe_mio` similarly. They are subsets, so any share computed by
+dividing by the sum of the reasons understates every other reason. The report marks them `(subset)`.
+
+**Clock differences survive into `rate` and `peak-normalised` figures.** Traces are separate
+process runs, so the SM clock can differ between them. `ngfx --lock-gpu-clocks` (help names
+`set-gpu-clocks` as its replacement) removes this; the scripts do not currently pass it.
+
+**The profiler costs about 18%, uniformly.** Ratios between variants survive; absolute times do
+not. Time the application with its own harness, never from these traces.
+
+## Which numbers to quote
+
+| Question | Trust | Quote |
+| --- | --- | --- |
+| Did the instruction count go down? | `count` | Yes — exactly, and it is clock-independent. |
+| Did occupancy go up? | `registers` + `rate` | Yes — cross-checked against a second API. |
+| Did memory behaviour change? | `ratio` | L1 sector hit rate, stable to 0.1%. |
+| Is it faster? | — | **Not from here.** Time it with the application's own harness. |
+| Where are the warps stalling? | — | **Not from here.** Use the Nsight GUI, and compare directions only. |
+
+## License
+
+MIT — see [LICENSE](LICENSE).
