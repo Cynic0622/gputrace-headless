@@ -1,11 +1,23 @@
-# Crop a region from a screenshot for detailed reading (full 2560x1440 shots lose small text).
+# Crop a region from a screenshot for detailed reading (a full-screen shot loses small text).
 param(
-    [string]$In = 'D:\Code\Bear\gui\step14-restored.png',
-    [string]$Out = 'D:\Code\Bear\gui\crop.png',
-    [int]$X, [int]$Y, [int]$W, [int]$H,
+    [Parameter(Mandatory = $true)][string]$In,
+    # Defaults to <input>-crop.png beside the input.
+    [string]$Out = '',
+    # Required: without them the crop is an empty bitmap, which fails inside System.Drawing with a
+    # message that says nothing about the missing arguments.
+    [Parameter(Mandatory = $true)][int]$X,
+    [Parameter(Mandatory = $true)][int]$Y,
+    [Parameter(Mandatory = $true)][int]$W,
+    [Parameter(Mandatory = $true)][int]$H,
     [double]$Zoom = 2.0
 )
 Add-Type -AssemblyName System.Drawing
+
+if ($Out -eq '') {
+    $Out = Join-Path (Split-Path -Parent $In) `
+        ([System.IO.Path]::GetFileNameWithoutExtension($In) + '-crop.png')
+}
+
 $src = [System.Drawing.Bitmap]::FromFile($In)
 $crop = New-Object System.Drawing.Bitmap($W, $H)
 $g = [System.Drawing.Graphics]::FromImage($crop)

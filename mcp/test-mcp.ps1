@@ -1,4 +1,14 @@
 # E2E test: spawn mcp/server.ps1, speak MCP stdio JSON-RPC, exercise all five tools.
+#
+# Self-contained on purpose: it captures first and then points the read-only tools at that
+# capture, so a fresh checkout needs nothing but a built target and the bundled profile. Point
+# -TraceRoot at an existing capture with -SkipCapture to exercise only the reading half.
+param(
+    # Where the capture writes and the read-only tools read from, as <root>\arm0, arm1, arm2.
+    [string]$TraceRoot = (Join-Path $env:TEMP 'gputrace-mcp-e2e'),
+    [switch]$SkipCapture
+)
+
 $ErrorActionPreference = 'Stop'
 $serverPath = Join-Path $PSScriptRoot 'server.ps1'
 
@@ -39,6 +49,10 @@ function Read-Mcp {
 $id = 0
 function Next-Id { $script:id++; return $script:id }
 
+$arm0 = Join-Path $TraceRoot 'arm0'
+$arm1 = Join-Path $TraceRoot 'arm1'
+$arm2 = Join-Path $TraceRoot 'arm2'
+
 Write-Host '== 1. initialize =='
 Send-Mcp -Id (Next-Id) -Method 'initialize' -Params @{ protocolVersion = '2024-11-05'; capabilities = @{}; clientInfo = @{ name = 'test'; version = '0' } }
 $init = Read-Mcp 'initialize'
@@ -50,38 +64,42 @@ Send-Mcp -Id (Next-Id) -Method 'tools/list'
 $list = Read-Mcp 'tools/list'
 Write-Host ("tools: {0}" -f (($list.result.tools | ForEach-Object { $_.name }) -join ', '))
 
-Write-Host '== 3. gputrace_report (gputrace-rts/arm0, validated) =='
-Send-Mcp -Id (Next-Id) -Method 'tools/call' -Params @{ name = 'gputrace_report'; arguments = @{ dir = 'D:\Code\Bear\gputrace-rts\arm0' } }
+if ($SkipCapture) {
+    Write-Host "== 3. gputrace_capture skipped (-SkipCapture); reading $TraceRoot =="
+} else {
+    Write-Host "== 3. gputrace_capture (real, non-elevated) ==="
+    Send-Mcp -Id (Next-Id) -Method 'tools/call' -Params @{ name = 'gputrace_capture'; arguments = @{ profile = 'ntc-benchmark'; outDir = $TraceRoot; startAfterFrames = 300; frames = 8; appSeconds = 15 } }
+    $cap = Read-Mcp 'tools/call' 600000
+    $capPayload = $cap.result.content[0].text | ConvertFrom-Json
+    Write-Host ("succeeded: {0}  elevated: {1}  exported: {2}" -f $capPayload.succeeded, $capPayload.elevatedViaUac,
+        (($capPayload.exported | ForEach-Object { $_.target }) -join ','))
+}
+
+Write-Host '== 4. gputrace_report (arm0) =='
+Send-Mcp -Id (Next-Id) -Method 'tools/call' -Params @{ name = 'gputrace_report'; arguments = @{ dir = $arm0 } }
 $rep = Read-Mcp 'tools/call'
 $repPayload = $rep.result.content[0].text | ConvertFrom-Json
 $t0 = $repPayload.traces[0]
-Write-Host ("validated OK; frame_time {0:N3} ms; sampled stall top: {1}" -f $t0.frame_time_ms,
+Write-Host ("frame_time {0:N3} ms; sampled stall top: {1}" -f $t0.frame_time_ms,
     (($t0.stalls_sampled.reasons.PSObject.Properties | Sort-Object { -[double]$_.Value } | Select-Object -First 2 | ForEach-Object { "$($_.Name)=$([Math]::Round([double]$_.Value,2))" }) -join ', '))
 
-Write-Host '== 4. gputrace_compare (3 arms) =='
-Send-Mcp -Id (Next-Id) -Method 'tools/call' -Params @{ name = 'gputrace_compare'; arguments = @{ dirs = @('D:\Code\Bear\gputrace-rts\arm0', 'D:\Code\Bear\gputrace-rts\arm1', 'D:\Code\Bear\gputrace-rts\arm2') } }
+Write-Host '== 5. gputrace_compare (3 arms) =='
+Send-Mcp -Id (Next-Id) -Method 'tools/call' -Params @{ name = 'gputrace_compare'; arguments = @{ dirs = @($arm0, $arm1, $arm2) } }
 $cmp = Read-Mcp 'tools/call'
 $cmpPayload = $cmp.result.content[0].text | ConvertFrom-Json
 Write-Host ("arms compared: {0}; isError: {1}" -f $cmpPayload.traces.Count, $cmp.result.isError)
 
-Write-Host '== 5. gputrace_list_metrics =='
-Send-Mcp -Id (Next-Id) -Method 'tools/call' -Params @{ name = 'gputrace_list_metrics'; arguments = @{ dir = 'D:\Code\Bear\gputrace-rts\arm0' } }
+Write-Host '== 6. gputrace_list_metrics (arm0) =='
+Send-Mcp -Id (Next-Id) -Method 'tools/call' -Params @{ name = 'gputrace_list_metrics'; arguments = @{ dir = $arm0 } }
 $lm = Read-Mcp 'tools/call'
 $lmPayload = $lm.result.content[0].text | ConvertFrom-Json
 Write-Host ("metric instances: {0}" -f $lmPayload.metrics.Count)
 
-Write-Host '== 6. gputrace_raw_metric (PCSampler stalls) =='
-Send-Mcp -Id (Next-Id) -Method 'tools/call' -Params @{ name = 'gputrace_raw_metric'; arguments = @{ dir = 'D:\Code\Bear\gputrace-rts\arm0'; pattern = 'PCSampler.*stalled' } }
+Write-Host '== 7. gputrace_raw_metric (PCSampler stalls) =='
+Send-Mcp -Id (Next-Id) -Method 'tools/call' -Params @{ name = 'gputrace_raw_metric'; arguments = @{ dir = $arm0; pattern = 'PCSampler.*stalled' } }
 $raw = Read-Mcp 'tools/call'
 $rawPayload = $raw.result.content[0].text | ConvertFrom-Json
 Write-Host ("raw metrics matched: {0}" -f $rawPayload.metrics.Count)
-
-Write-Host '== 7. gputrace_capture (real, non-elevated, arm0 only) =='
-Send-Mcp -Id (Next-Id) -Method 'tools/call' -Params @{ name = 'gputrace_capture'; arguments = @{ profile = 'ntc-benchmark'; outDir = (Join-Path $env:TEMP 'gputrace-mcp-e2e'); startAfterFrames = 300; frames = 8; appSeconds = 15 } }
-$cap = Read-Mcp 'tools/call' 600000
-$capPayload = $cap.result.content[0].text | ConvertFrom-Json
-Write-Host ("succeeded: {0}  elevated: {1}  exported: {2}" -f $capPayload.succeeded, $capPayload.elevatedViaUac,
-    (($capPayload.exported | ForEach-Object { $_.target }) -join ','))
 
 if (-not $proc.HasExited) { $proc.Kill() }
 Write-Host 'E2E DONE'

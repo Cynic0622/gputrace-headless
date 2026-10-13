@@ -258,7 +258,7 @@ function Read-Trace {
     }
 
     # D3DPERF_EVENTS.xls is the per-pass timing breakdown the metric tables never carry: one row
-    # per named event (NTC.Benchmark, UI, ...), one ms column per traced frame.
+    # per named event the application declares, one ms column per traced frame.
     $events = [ordered]@{}
     $eventsFile = Join-Path $TraceDir 'BASE\D3DPERF_EVENTS.xls'
     if (Test-Path -LiteralPath $eventsFile) {
