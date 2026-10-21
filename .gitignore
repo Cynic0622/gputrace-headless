@@ -12,6 +12,36 @@ gui/
 *.xls
 *.layout
 
+# Regenerable pipeline output: decompressed sections, extracted sampling buffers,
+# histograms. 716 MiB+ per capture, rebuildable with wrpv-dump.py / pcs-*.py.
+out/
+
+# Build products of the tools under tools/
+tools/vklayer/*.obj
+tools/vklayer/*.exp
+tools/vklayer/*.lib
+tools/vkproxy/*.obj
+tools/vkproxy/*.exp
+tools/vkproxy/*.lib
+tools/vkproxy/vulkan-1.dll
+tools/vkproxy/vulkan-1.exp
+tools/vkproxy/vulkan-1.lib
+tools/vkproxy/vulkan-exports.txt
+
+# Preserved reference captures. These are the oracles every number in docs/ is checked
+# against, and they are 100 MB each, so they live on disk and are referenced by path
+# rather than committed. Re-create with gputrace-capture.ps1.
+captures/
+
+# Python bytecode: regenerated on every run and machine-specific.
+__pycache__/
+*.pyc
+
+# Shipped NVIDIA binaries, copied here for REA analysis. Re-obtainable from the
+# install; a 20 MB DLL does not belong in the history.
+WarpVizPlugin.dll
+*.dll
+
 # Editor / OS
 .vscode/
 .idea/
