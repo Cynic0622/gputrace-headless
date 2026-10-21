@@ -180,6 +180,17 @@ The working recipe:
 ngfx --activity "GPU Trace Profiler" ... --metric-set-id 1 --multi-pass-metrics --real-time-shader-profiler
 ```
 
+**Where the per-PC / per-source-line numbers live.** The capture carries the raw
+warp-state sample buffer and nothing else about the shader. `pcSamplesStorage`
+decodes headlessly to per-PC sample counts and per-PC stall reasons (verified
+against the capture's own `GPUTrace.PCSampler.*` aggregate), but the PC →
+source-line step needs a cubin with a DWARF line table, and the GPU Trace host
+only embeds one when *Tools → Options → Search Paths → Separate Shader Debug
+Information* is configured — which it is not by default. The whole chain, with
+the `WarpVizPlugin.dll` addresses and strings behind each step, is in
+[`docs/warpviz-decompile-2026-10-15.md`](docs/warpviz-decompile-2026-10-15.md);
+current state is in [`docs/HANDOFF.md`](docs/HANDOFF.md).
+
 **The per-pass timing breakdown was always in the export.** `D3DPERF_EVENTS.xls` is one row per
 named event, one ms column per traced frame — the pass/draw split, no GUI needed.
 `gputrace-report.ps1` reads it, plus `REPRO_INFO.xls` (capture provenance) and, with `-Regimes`,
@@ -242,8 +253,11 @@ the same way and points at the auto-export folder. Enabling multi-pass does **no
 GUI's numbers, which confirms the two are different quantities rather than two views of one. On
 one measured variant the GUI reported `LGTHR 28% / LGSB 19% / NOTSEL 19%` where the counter-based
 figures gave `NOTSEL 42% / MATHPT 34% / LGSB 3.4%`. **Compare directions, never absolute values.**
-Per-instruction and per-source-line attribution lives in the same container, so it needs the GUI
-(use `gui-harvest.ps1`).
+Per-instruction and per-source-line attribution live in the same container and do **not** need the
+GUI: `gputrace-extract.py` locates the blob table and the PC-sample buffers by structure, and
+`pcs-lines.py` turns them into a per-source-line table. The derivation, the corrected mechanism and
+the measured limits are in [`docs/per-source-line-solved-2026-10-19.md`](docs/per-source-line-solved-2026-10-19.md)
+— that document is the single source of truth; any older note calling this step GUI-only is stale.
 
 **Two stall metrics are pipe-qualified.** `long_scoreboard_pipe_l1tex` is long-scoreboard on the
 L1TEX pipe only, and `mio_throttle_pipe_mio` similarly. They are subsets, so any share computed by

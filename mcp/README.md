@@ -59,8 +59,10 @@ server 默认在上层目录找 CLI；若你把它单独放到别处，设环境
 
 ## 已知边界
 
-- **逐指令/逐源码行归因（Source Positions）与 per-PSO Instruction Mix** 不在结构化导出里
-  （NVIDIA 封存在 trace 容器内），需要时用 `gui-harvest.ps1` 截图转录。
+- **逐指令/逐源码行归因（Source Positions）与 per-PSO Instruction Mix** 不在结构化 CSV 导出里
+  （NVIDIA 封存在 trace 容器内），但**不需要 GUI**：`gputrace-extract.py` 按结构定位 blob 表与
+  PC 采样缓冲区，`pcs-lines.py` 产出逐源码行表。推导、机制与限制见
+  [`docs/per-source-line-solved-2026-10-19.md`](../docs/per-source-line-solved-2026-10-19.md)。
 - Nsight Graphics 2026.1 + Ada 实测；其它架构/版本的指标名集合可能不同——先用
   `gputrace_list_metrics` 确认。
 - GeForce 无 NVCP 解锁时每次抓取需要一次 UAC 点击（MCP 会返回 `elevatedViaUac: true` 提示）。
