@@ -764,8 +764,19 @@ if ($Json) {
             validation = @($validation[$label])
         }
     }
+    $jsonFailures = 0
+    if ($Validate) {
+        foreach ($label in $labels) {
+            foreach ($check in $validation[$label]) {
+                if ($check.Status -eq 'FAIL') { $jsonFailures++ }
+            }
+        }
+    }
     $payload | ConvertTo-Json -Depth 10
-    exit 0
+    # -Json must still be machine-readable on failure, but a failing validation has to
+    # reach the caller through the exit code as well; otherwise "never mistake a bad
+    # trace for a good one" only holds for the human-readable path.
+    exit $(if ($jsonFailures -gt 0) { 1 } else { 0 })
 }
 
 $reference = $labels[0]
