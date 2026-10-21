@@ -1,0 +1,5 @@
+smsp__thread_inst_executed_per_inst_executed.ratio	16
+SM_A.TriageSCG.sm__inst_executed_realtime.sum	100
+SM_A.TriageSCG.sm__inst_executed_pipe_alu_realtime.sum	40
+SM_A.TriageSCG.sm__inst_executed_pipe_xu_realtime.sum	10
+SM_C.TriageSCG.smsp__inst_executed_pipe_fma.sum	20

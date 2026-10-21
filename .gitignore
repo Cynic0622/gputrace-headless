@@ -12,6 +12,9 @@ gui/
 *.xls
 *.layout
 
+# Test fixtures are the one place a .xls is authored rather than exported.
+!tests/fixtures/**/*.xls
+
 # Regenerable pipeline output: decompressed sections, extracted sampling buffers,
 # histograms. 716 MiB+ per capture, rebuildable with wrpv-dump.py / pcs-*.py.
 out/
