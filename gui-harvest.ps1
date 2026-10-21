@@ -666,8 +666,21 @@ function Wait-MainWindow {
 
 function Focus-Ui {
     param($Process)
-    [void][Win32Focus]::ShowWindow($Process.MainWindowHandle, 9)   # SW_RESTORE
-    [void][Win32Focus]::SetForegroundWindow($Process.MainWindowHandle)
+    $Process.Refresh()
+    $hwnd = $Process.MainWindowHandle
+    if ($hwnd -eq [IntPtr]::Zero) { return }
+
+    # Minimized windows sit at (-32000,-32000) and SetForegroundWindow does not restore them. A
+    # SendKeys to a window in that state goes to whatever is actually in front, which is how an
+    # 'open' run reported success while the trace never loaded (measured 2026-10-21).
+    [void][Win32Focus]::ShowWindow($hwnd, 9)      # SW_RESTORE
+    Start-Sleep -Milliseconds 300
+
+    # The foreground lock refuses a plain SetForegroundWindow from a background process - the
+    # script's own ForceForeground attaches to the foreground thread to get around it. Fall back
+    # to raising the window in the z-order when even that is refused.
+    [void][Win32Focus]::ForceForeground($hwnd)
+    if ([Win32Focus]::GetForegroundWindow() -ne $hwnd) { [Win32Focus]::RaiseToTop($hwnd) }
     Start-Sleep -Milliseconds 600
 }
 

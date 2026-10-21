@@ -396,6 +396,18 @@ def verify(args, per_line, names):
     t20g = set(sorted(gui, key=lambda k: -gui[k])[:20])
     print("\nverify against %s" % args.verify)
     print("  GUI lines reported : %d   reproduced : %d" % (len(gui), len(both)))
+    exact = sum(1 for k in both if mine[k] == gui[k])
+    delta = sum(abs(mine[k] - gui[k]) for k in both)
+    print("  identical counts   : %d / %d lines" % (exact, len(both)))
+    print("  sum |delta|        : %d samples (%.6f %% of attributed)"
+          % (delta, 100.0 * delta / max(1, sum(mine.values()))))
+    print("  only in GUI / us   : %d / %d lines"
+          % (len(set(gui) - set(mine)), len(set(mine) - set(gui))))
+    if exact < len(both):
+        print("  differing lines:")
+        for k in sorted(both, key=lambda k: -abs(mine[k] - gui[k]))[:8]:
+            print("    %s:%d  gui=%d headless=%d  delta=%+d"
+                  % (k[0], k[1], gui[k], mine[k], mine[k] - gui[k]))
     print("  Spearman rho       : %.4f" % rho)
     print("  top-20 overlap     : %d/20" % len(t20m & t20g))
     missing = [k for k in sorted(gui, key=lambda k: -gui[k]) if k not in mine]
@@ -403,9 +415,14 @@ def verify(args, per_line, names):
         print("  GUI lines not reached (%d, all < %.0f samples): %s"
               % (len(missing), max(gui[k] for k in missing),
                  ", ".join("%s:%d" % (k[0], k[1]) for k in missing[:6])))
-    print("  NOTE the GUI export and this capture are different runs; the GUI "
-          "is not shipped with a capture identifier, and its totals differ by a "
-          "constant factor.\n  Compare shape, not absolute counts.")
+    if not missing and exact == len(both):
+        print("  All GUI lines reproduced with identical sample counts.")
+    elif not missing:
+        print("  NOTE every GUI line is reproduced; the residual above is per-line"
+              "\n  bucketing, not a missing join.")
+    else:
+        print("  NOTE the GUI export may come from a different run: its totals then"
+              "\n  differ by a constant factor. Compare shape, not absolute counts.")
 
 
 if __name__ == "__main__":
