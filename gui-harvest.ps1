@@ -110,6 +110,11 @@ public static class Win32Focus {
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+    // Added 2026-10-14: enumerate this process's visible top-level windows, so Get-UiRoot can
+    // pick the window that actually holds the populated UI instead of the stale MainWindowHandle.
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessageW(IntPtr hWnd, uint msg, IntPtr w, string l);
     [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
     [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
@@ -202,9 +207,40 @@ $TS_DESC = [System.Windows.Automation.TreeScope]::Descendants
 
 function Get-UiRoot {
     param([System.Diagnostics.Process]$Process)
+    # Process.MainWindowHandle is a cached, often-stale value for Qt apps: for a long-lived
+    # ngfx-ui it can point at a hidden splash/top-level window while the real, fully-populated
+    # UI lives on another visible window of the same process (measured 2026-10-14: handle
+    # 0x1e3062 held 168 elements, 0x30d4a held 16497). Enumerate this process's own visible
+    # top-level windows and keep the one whose UIA subtree is largest.
+    $best = $null
+    $bestCount = -1
+    foreach ($h in (Get-VisibleTopLevelWindows -ProcessId $Process.Id)) {
+        try { $el = [System.Windows.Automation.AutomationElement]::FromHandle($h) }
+        catch { continue }
+        if ($null -eq $el) { continue }
+        $count = 0
+        try { $count = $el.FindAll($TS_DESC, [System.Windows.Automation.Condition]::TrueCondition).Count }
+        catch { $count = 0 }
+        if ($count -gt $bestCount) { $bestCount = $count; $best = $el }
+    }
+    if ($null -ne $best) { return $best }
     if ($Process.MainWindowHandle -eq [IntPtr]::Zero) { return $null }
     try { return [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle) }
     catch { return $null }
+}
+
+function Get-VisibleTopLevelWindows {
+    param([int]$ProcessId)
+    $list = New-Object System.Collections.ArrayList
+$cb = [Win32Focus+EnumWindowsProc] {
+    param($h, $l)
+    $wpid = [uint32]0
+    [Win32Focus]::GetWindowThreadProcessId($h, [ref]$wpid) | Out-Null
+    if ($wpid -eq [uint32]$ProcessId -and [Win32Focus]::IsWindowVisible($h)) { [void]$list.Add([IntPtr]$h) }
+    return $true
+}
+[Win32Focus]::EnumWindows($cb, [IntPtr]::Zero) | Out-Null
+return @($list)
 }
 
 function Get-UiProp {

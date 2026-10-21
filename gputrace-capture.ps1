@@ -54,6 +54,14 @@ param(
     # Shader Pipelines must show non-zero samples, or REPRO_INFO must stop saying Disabled).
     [switch]$WarpStateSampling,
     [switch]$DryRun,
+    # Keep whatever is already in a variant's trace directory. Without this the directory is moved
+    # aside, never deleted: the previous run's .ngfx-gputrace is the only oracle for the GUI, and
+    # losing it silently costs a full re-capture (that is how the 2026-10-14 reference was lost).
+    [switch]$KeepExisting,
+    # Trace only the named profile variants. A shader-profiler capture is minutes per variant and
+    # the variants differ only in a shader arm, so re-running all of them to answer one question
+    # about a single arm is wasted machine time.
+    [string[]]$Variant = @(),
     # Where the target application lives. Normally left to the profile, whose workDir is resolved
     # against the profile file so a profile can point at a checkout next to itself; passing this
     # overrides that, and the current directory is the last resort.
@@ -240,6 +248,19 @@ foreach ($v in @($profileData.variants)) {
 }
 if ($targets.Count -eq 0) { throw 'no trace targets (empty variants list in the profile)' }
 
+# Applied after the profile's variants are read so the error for a typo names what was available.
+# Split on commas as well as accepting an array: the elevated relaunch passes the whole list as one
+# -Variant argument, because Windows PowerShell does not quote ArgumentList entries individually.
+if ($Variant.Count -gt 0) {
+    $wanted = @($Variant | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+    $available = @($targets | ForEach-Object { $_.Name })
+    $unknown = @($wanted | Where-Object { $_ -notin $available })
+    if ($unknown.Count -gt 0) {
+        throw "-Variant '$($unknown -join ', ')' is not in the profile; available: $($available -join ' ')"
+    }
+    $targets = @($targets | Where-Object { $_.Name -in $wanted })
+}
+
 # How the application is asked to stop, if it can be asked at all.
 #
 # This used to be an unconditional "--timeout <n>" appended to every target, which quietly
@@ -351,6 +372,8 @@ if (-not (Test-Elevated) -and -not (Test-CountersUsable -Ngfx $ngfx -AppPath $ap
     if ($ShaderProfiler) { $relaunchArgs += '-ShaderProfiler' }
     if ($MultiPassMetrics) { $relaunchArgs += '-MultiPassMetrics' }
     if ($WarpStateSampling) { $relaunchArgs += '-WarpStateSampling' }
+    if ($KeepExisting) { $relaunchArgs += '-KeepExisting' }
+    if ($Variant.Count -gt 0) { $relaunchArgs += @('-Variant', (Quote-Argument ($Variant -join ','))) }
 
     $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $relaunchArgs -Verb RunAs -PassThru
     $process.WaitForExit()
@@ -387,7 +410,19 @@ try {
     foreach ($t in $targets) {
         $traceDir = Join-Path $outputDir $t.Name
         try {
-            if (Test-Path -LiteralPath $traceDir) { Remove-Item -LiteralPath $traceDir -Recurse -Force }
+            # Moved aside rather than deleted. This directory holds the only copy of the previous
+            # capture, and a trace takes minutes to produce; a run that failed before writing a new
+            # one must not also destroy the reference it was going to be compared against.
+            if (Test-Path -LiteralPath $traceDir) {
+                if ($KeepExisting) {
+                    Write-Warning "$($t.Name): keeping the existing $traceDir; ngfx may overwrite files in it"
+                } else {
+                    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+                    $aside = "$traceDir.prev-$stamp"
+                    Move-Item -LiteralPath $traceDir -Destination $aside
+                    Write-Host "previous capture moved aside: $aside"
+                }
+            }
             New-Item -ItemType Directory -Force -Path $traceDir | Out-Null
 
             Write-Host ''
