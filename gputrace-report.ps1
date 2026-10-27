@@ -41,7 +41,10 @@
                         sub-partition. The architecture comes from the capture's own REPRO_INFO
                         (chip name), so this needs no input; it is skipped, never guessed, when
                         the chip is unknown. -Architecture overrides.
-      6 determinism     two traces of the same arm agree exactly on every count
+      6 determinism     two traces of the same arm executed the same work: every workload count
+                        agrees within 0.05%. Counters that measure *when* work happened (GPU
+                        cycles, PCIe traffic, front-end queue stalls) are reported separately:
+                        they cannot be reproduced across two independent runs of a live app.
       7 event-budget    the per-pass timings (D3DPERF_EVENTS) sum to no more than the frame time
                         (FRAME.xls) - two different tables that must agree
       8 sampling-provenance  REPRO_INFO records whether warp state sampling was enabled; only
@@ -49,11 +52,16 @@
 
 .LIMITATIONS - read before trusting a stall number
     * Stall reasons exist only with -MultiPassMetrics. The plain metric set has none.
-    * Nsight's GUI "Top Stall" table is populated from data inside the .ngfx-gputrace container,
-      which on Nsight 2026 is a binary WRPV blob that is not publicly parseable (confirmed against
-      nsight-graphics-mcp, which gives up on WRPV in the same way). The counter-based stall numbers
-      here are therefore NOT the same quantity as the GUI's, and must not be presented as if they
-      were. Their absolute values differ by large factors; only the direction is usable.
+    * Nsight's GUI "Top Stall" table is built from per-PC samples inside the .ngfx-gputrace
+      container (WRPV sections, decoded by gputrace-extract.py / pcs-lines.py). The counter-based
+      stall numbers here are therefore NOT the same quantity as the GUI's, and must not be
+      presented as if they were. Their absolute values differ by large factors; only the direction
+      is usable.
+    * No single Ada metric set satisfies all eight checks (measured 2026-10-27, driver 610.88):
+      set 1 "Throughput Metrics" lacks the thread-per-instruction ratio and the RF-occupancy
+      counter; set 2 "Top-Level Triage" has both, but enabling the real-time shader profiler
+      replaces the RF-occupancy counter, so `registers` and `sampling-provenance` cannot both PASS
+      on one trace. This is Nsight behaviour, not a bug here - see docs/validation-2026-10-27.md.
     * At least one stall metric is pipe-qualified - smsp__warps_issue_stalled_long_scoreboard_pipe_l1tex
       is long-scoreboard on the L1TEX pipe only, not the total - which distorts any share computed
       by dividing by the sum of the reasons.
@@ -373,10 +381,53 @@ function Get-Median {
     return $sorted[[int][Math]::Floor($sorted.Count / 2)]
 }
 
+# Counters this check set asks for by their canonical Nsight name, mapped to the counter the
+# "Throughput Metrics" set actually emits. `sm__inst_executed_realtime` and `smsp__inst_executed`
+# are the same rollup: on 2026-10-27, 100 * smsp__inst_executed.avg.per_cycle_elapsed / 4 = 58.05,
+# which is exactly smsp__inst_executed.avg.pct_of_peak_sustained_elapsed in the same trace.
+$MetricAliases = @{
+    'sm__inst_executed_realtime.sum'                   = 'smsp__inst_executed.sum'
+    'sm__inst_executed_realtime.avg.per_cycle_elapsed' = 'smsp__inst_executed.avg.per_cycle_elapsed'
+}
+
+# Group prefixes such as 'SM_A.TriageSCG.' / 'TPC.TriageSCG.' identify the counter block and are
+# not part of the metric identity; which ones are present changes with driver version and metric
+# set. 2026-10-27: driver 610.88 emits `tpc__warps_active_shader_ps_realtime.*` bare, while the
+# checks were written against the 591.86 form `TPC.TriageSCG.tpc__...`. Resolving by exact name
+# only made three checks skip on a capture that had every counter they needed.
+function Resolve-MetricName {
+    param($Trace, [string]$Name)
+
+    if ($Trace.Series.ContainsKey($Name)) { return $Name }
+
+    $leaf = $Name -replace '^.*?\.TriageSCG\.', ''
+    if ($Trace.Series.ContainsKey($leaf)) { return $leaf }
+    if ($MetricAliases.ContainsKey($leaf) -and $Trace.Series.ContainsKey($MetricAliases[$leaf])) {
+        return $MetricAliases[$leaf]
+    }
+
+    # Last resort: a unique "<group>.<leaf>" match. Ambiguity returns $null rather than picking
+    # one of two differently-scoped counters, so the caller reports SKIP instead of a wrong PASS.
+    $hits = @($Trace.Series.Keys | Where-Object { $_.EndsWith('.' + $leaf) })
+    if ($hits.Count -eq 1) { return $hits[0] }
+    return $null
+}
+
 function Get-MetricOrNaN {
     param($Trace, [string]$Name)
-    if ($Trace.Series.ContainsKey($Name)) { return Get-Median $Trace.Series[$Name] }
-    return [double]::NaN
+    $resolved = Resolve-MetricName $Trace $Name
+    if ($null -eq $resolved) { return [double]::NaN }
+    return Get-Median $Trace.Series[$resolved]
+}
+
+# A count that measures elapsed clock/bus activity rather than work performed. Two independent
+# runs of a real-time application cannot reproduce these: the capture window lands at a different
+# phase of the frame, the GPU clock free-runs, and the host PCIe bus carries unrelated desktop
+# traffic. Measured 2026-10-27 across two arm1 traces: instruction/warp/pixel counts agreed to
+# 0.004%, while these differed by up to 7%. Counted and reported, not failed.
+function Test-TimingDomainCount {
+    param([string]$Name)
+    return $Name -match '(^|\.)(gr__cycles_|pcie__|PCI\.|FE_)|_cycles_stalled_'
 }
 
 # Classifies any metric, so -Metric and -List label what they print.
@@ -528,20 +579,41 @@ function Test-Trace {
         Add-Check $checks 'peak-bound' 'SKIP' 'needs both stall counters and warps_active'
     }
 
-    # 6. Determinism. Compared against another trace of the same arm only; counts are exact, so any
-    #    difference at all means the two runs did not execute the same work. Every count-class
-    #    metric in the trace is checked, not a curated subset.
+    # 6. Determinism. Compared against another trace of the same arm only. Two independent runs of
+    #    a live application never reproduce *timing* counters, so the check is on the work that was
+    #    executed: every workload count must agree within 0.05 %. That tolerance is ~12x the worst
+    #    deviation measured between two good runs (0.004 %) and far below a one-frame change, so it
+    #    separates run-to-run jitter from "the two runs executed different work".
     if ($null -ne $ReferenceTrace) {
+        $tolerance = 0.0005
         $differences = @()
+        $compared = 0
+        $timingSkipped = 0
+        $maxRel = 0.0
+        $worst = ''
         foreach ($name in $Trace.Series.Keys) {
             if ((Get-EvidenceClass $name) -ne 'count') { continue }
             if (-not $ReferenceTrace.Series.ContainsKey($name)) { continue }
+            if (Test-TimingDomainCount $name) { $timingSkipped++; continue }
+
             $a = Get-Median $Trace.Series[$name]
             $b = Get-Median $ReferenceTrace.Series[$name]
-            if ($a -ne $b) { $differences += ("{0}: {1:G6} vs {2:G6}" -f (Split-Path $name -Leaf), $a, $b) }
+            $compared++
+            if ($a -eq $b) { continue }
+
+            $scale = [Math]::Max([Math]::Abs($a), [Math]::Abs($b))
+            $rel = if ($scale -gt 0) { [Math]::Abs($a - $b) / $scale } else { 1.0 }
+            if ($rel -gt $maxRel) { $maxRel = $rel; $worst = $name }
+            if ($rel -gt $tolerance) {
+                $differences += ("{0}: {1:G6} vs {2:G6} ({3:P2})" -f $name, $a, $b, $rel)
+            }
         }
+        $where = ''
+        if ($worst) { $where = " (worst: $worst)" }
         if ($differences.Count -eq 0) {
-            Add-Check $checks 'determinism' 'PASS' 'every count is bit-identical to the reference trace'
+            Add-Check $checks 'determinism' 'PASS' (
+                "{0} workload counts compared, max deviation {1:P3}{2}; {3} timing-domain counts not comparable across runs" -f
+                $compared, $maxRel, $where, $timingSkipped)
         } else {
             Add-Check $checks 'determinism' 'FAIL' ($differences -join '; ')
         }
