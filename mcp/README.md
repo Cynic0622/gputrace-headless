@@ -1,9 +1,12 @@
 # gputrace-mcp — headless GPU Trace 分析的 MCP server
 
 让 LLM agent 无需人工介入即可**抓取、解析、校验、对比** Nsight Graphics GPU Trace 数据——包括
-GUI Top Stall 表的同源采样数据（warp-state sampling）。
+GUI Top Stall 表的同源采样数据（warp-state sampling），以及逐源码行采样归因（GUI Source
+Positions 的数据，`gputrace_source_lines`）。
 
-零依赖：Windows + Nsight Graphics + PowerShell，无 Node/Python/包安装。
+依赖：Windows + Nsight Graphics + PowerShell，无 Node/包安装。唯一例外：`gputrace_source_lines`
+的容器解码需要 **Python 3**（仅标准库、无包；用工具的 `python` 输入参数或 `$env:GPUTRACE_PYTHON`
+指定解释器）。没有 Python 时该工具返回结构化错误，其余工具不受影响。
 
 ## 安装
 
@@ -47,6 +50,7 @@ server 默认在上层目录找 CLI；若你把它单独放到别处，设环境
 | `gputrace_compare` | 2+ 目录对比（同一工作负载的不同版本） |
 | `gputrace_list_metrics` | 全部指标实例（含同名多实例 `#2`，不同汇总层级数值可差数倍） |
 | `gputrace_raw_metric` | 按正则拉原始逐帧行（审计用） |
+| `gputrace_source_lines` | 直接解码 `.ngfx-gputrace` 容器，输出逐源码行采样归因（GUI Source Positions 的数据，无需 GUI）。每行带两个主导 stall 原因；解码结果先对拍抓帧自身的 `GPUTrace.PCSampler.*` 聚合（>1.0 pp 拒绝返回）。需要 Python 3（仅标准库）；冷解码需数分钟 |
 
 ## 准确性契约（内置于每个 report/compare 响应）
 
@@ -59,10 +63,12 @@ server 默认在上层目录找 CLI；若你把它单独放到别处，设环境
 
 ## 已知边界
 
-- **逐指令/逐源码行归因（Source Positions）与 per-PSO Instruction Mix** 不在结构化 CSV 导出里
-  （NVIDIA 封存在 trace 容器内），但**不需要 GUI**：`gputrace-extract.py` 按结构定位 blob 表与
-  PC 采样缓冲区，`pcs-lines.py` 产出逐源码行表。推导、机制与限制见
-  [`docs/per-source-line-solved-2026-10-19.md`](../docs/per-source-line-solved-2026-10-19.md)。
+- **逐源码行采样归因（Source Positions）** 不在结构化 CSV 导出里，但**不需要 GUI**：
+  `gputrace_source_lines` 工具直接解码 trace 容器产出逐源码行表（每行的样本数与 stall 构成）。
+  该解码是本工具唯一需要 **Python 3**（仅标准库、无包）的部分——用 `python` 输入参数或
+  `$env:GPUTRACE_PYTHON` 指定解释器；未配置时返回结构化错误并给出补救说明。机制、推导与
+  验证记录见 [`docs/per-source-line-solved-2026-10-19.md`](../docs/per-source-line-solved-2026-10-19.md)。
+- **per-PSO Instruction Mix**（每个着色器的指令构成统计）仍无 headless 通路。
 - Nsight Graphics 2026.1 + Ada 实测；其它架构/版本的指标名集合可能不同——先用
   `gputrace_list_metrics` 确认。
 - GeForce 无 NVCP 解锁时每次抓取需要一次 UAC 点击（MCP 会返回 `elevatedViaUac: true` 提示）。

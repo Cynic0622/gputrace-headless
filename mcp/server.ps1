@@ -1,6 +1,9 @@
-# gputrace-mcp: a zero-dependency MCP server (stdio, PowerShell) exposing headless GPU Trace
-# analysis. Windows + Nsight Graphics is the target audience, so PowerShell is the only runtime
-# requirement - no Node, no Python, no package installs.
+# gputrace-mcp: an MCP server (stdio, PowerShell) exposing headless GPU Trace analysis.
+# Windows + Nsight Graphics is the target audience, so PowerShell is the only runtime the
+# capture/report/compare tools need - no Node, no packages. The one exception is
+# gputrace_source_lines, which decodes the capture container and needs Python 3 (stdlib
+# only) on the machine; without it that tool returns a structured error and everything
+# else still works.
 #
 # Tools (all wrap the PowerShell CLI in this repo's root - the CLI is the engine, this server is
 # the LLM-facing interface):
@@ -11,6 +14,9 @@
 #   gputrace_compare      - validated side-by-side comparison of 2+ capture directories
 #   gputrace_list_metrics - every metric instance in a capture (incl. same-name duplicates)
 #   gputrace_raw_metric   - raw per-frame rows for metrics matching a pattern (auditability)
+#   gputrace_source_lines - per-source-line warp-state (PC) sample attribution decoded from the
+#                           .ngfx-gputrace container itself (the GUI Source Positions data, no GUI
+#                           needed; requires Python 3 - stdlib only)
 #
 # Accuracy contract (embedded in every report/compare response):
 #   - captures that failed validation are refused, never returned as data
@@ -29,8 +35,12 @@ $SERVER_ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 $TOOLS_DIR = if ($env:GPUTRACE_TOOLS_DIR) { $env:GPUTRACE_TOOLS_DIR } else { Split-Path -Parent $SERVER_ROOT }
 $CAPTURE_SCRIPT = Join-Path $TOOLS_DIR 'gputrace-capture.ps1'
 $REPORT_SCRIPT = Join-Path $TOOLS_DIR 'gputrace-report.ps1'
+$SAMPLING_SCRIPT = Join-Path $TOOLS_DIR 'gputrace-sampling.ps1'
 $CAPTURE_TIMEOUT_MS = 20 * 60 * 1000
 $REPORT_TIMEOUT_MS = 5 * 60 * 1000
+# A cold decode decompresses the whole container (~600 MB from a ~100 MB capture) and
+# histograms millions of samples; measured well under 10 minutes on the reference machine.
+$SAMPLING_TIMEOUT_MS = 15 * 60 * 1000
 
 $AGGREGATION_NOTE =
   'Aggregation semantics: the Nsight GUI displays time-weighted values over the whole trace ' +
@@ -40,13 +50,22 @@ $AGGREGATION_NOTE =
   'ratios against an assumed peak; count = deterministic event totals; rate = per-cycle ' +
   'averages; time = durations with bounded jitter.'
 
+function ConvertTo-CliArg {
+    # Quotes one argument for ProcessStartInfo.Arguments (Windows argv rules). The Nsight
+    # install root - a legal -NgfxPath - contains spaces, so quoting is not optional.
+    param([string]$Value)
+    if ($Value -notmatch '[\s"]') { return $Value }
+    $v = $Value -replace '(\\+)$', '$1$1'      # backslashes before the closing quote are escapes
+    $v = $v -replace '"', '\"'
+    return "`"$v`""
+}
+
 function Invoke-Cli {
     param([string]$Script, [string[]]$CliArgs, [int]$TimeoutMs)
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = 'powershell.exe'
-    # A plain space-join is safe here: the CLI paths and args contain no spaces, and quoting
-    # through ProcessStartInfo.Arguments has its own escaping rules that do not apply.
-    $psi.Arguments = ((@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Script) + $CliArgs) | ForEach-Object { $_ }) -join ' '
+    $psi.Arguments = ((@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Script) + $CliArgs) |
+                      ForEach-Object { ConvertTo-CliArg $_ }) -join ' '
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.UseShellExecute = $false
@@ -199,6 +218,31 @@ function Invoke-ToolRawMetric {
               note = 'Raw per-frame values as stored in the export. Same-name instances appear as Name, Name#2, ... - compare instances before citing.' }
 }
 
+function Invoke-ToolSourceLines {
+    param([hashtable]$toolInput)
+    $trace = [string]$toolInput.trace
+    if (-not $trace) { return @{ error = 'trace is required (path to a .ngfx-gputrace file)' } }
+    if (-not (Test-Path -LiteralPath $trace)) { return @{ error = "trace not found: $trace" } }
+    $cliArgs = @('-Trace', $trace, '-Json')
+    if ($toolInput.workDir) { $cliArgs += @('-WorkDir', [string]$toolInput.workDir) }
+    if ($toolInput.top) { $cliArgs += @('-Top', [string][int]$toolInput.top) }
+    if ($toolInput.python) { $cliArgs += @('-Python', [string]$toolInput.python) }
+    if ($toolInput.skipAggregateCheck) { $cliArgs += '-SkipAggregateCheck' }
+    $run = Invoke-Cli -Script $SAMPLING_SCRIPT -CliArgs $cliArgs -TimeoutMs $SAMPLING_TIMEOUT_MS
+    $payload = ConvertFrom-JsonLoose $run.Stdout
+    if ($null -eq $payload -or $null -eq $payload.trace) {
+        $errText = if ($payload -and $payload.error) { [string]$payload.error } else { 'could not parse sampling output' }
+        $result = @{ error = $errText }
+        if ($errText -match 'no Python 3') {
+            $result.hint = 'Install Python 3 (stdlib only) or pass the python input / set GPUTRACE_PYTHON to an existing python.exe. The capture-container decode is the one part of this tool that is not PowerShell-only.'
+        }
+        if ($run.Stderr) { $result.stderrTail = ($run.Stderr -split "`r?`n") | Select-Object -Last 8 }
+        if ($run.Stdout) { $result.stdoutTail = ($run.Stdout -split "`r?`n") | Select-Object -Last 8 }
+        return $result
+    }
+    return $payload
+}
+
 $TOOLS = @(
     @{ name = 'gputrace_capture'
        description = ('Capture GPU Trace(s) of a target application headlessly via the Nsight Graphics CLI, ' +
@@ -245,6 +289,28 @@ $TOOLS = @(
        description = 'Raw per-frame values for metrics matching a regex - the unaggregated source rows. Use to audit any aggregated claim.'
        inputSchema = @{ type = 'object'; properties = @{ dir = @{ type = 'string' }; pattern = @{ type = 'string'; description = 'Regex on metric name, e.g. "PCSampler.*stalled"' } }; required = @('dir', 'pattern') }
        handler = 'Invoke-ToolRawMetric' }
+    @{ name = 'gputrace_source_lines'
+       description = ('Per-source-line warp-state (PC) sample attribution decoded from the .ngfx-gputrace ' +
+                      'container itself - the data behind the GUI Source Positions / Top Stall views, with no ' +
+                      'GUI and no export. Returns the top source lines by sample count with each line''s two ' +
+                      'dominant stall reasons, attribution coverage, and the aggregate cross-check verdict ' +
+                      '(the decoded stall mix is validated against the capture''s own GPUTrace.PCSampler.* ' +
+                      'aggregate; a deviation beyond 1.0 percentage point withholds the data). All values are ' +
+                      'evidence class "sampled": count-weighted, whereas GUI panel values are time-weighted - ' +
+                      'compare ranks and shapes, never absolute percentages. Needs Python 3 (stdlib only) on ' +
+                      'the machine; a cold decode takes minutes.')
+       inputSchema = @{
+           type = 'object'
+           properties = @{
+               trace = @{ type = 'string'; description = 'Path to the .ngfx-gputrace file to decode.' }
+               workDir = @{ type = 'string'; description = 'Where decoded buffers and CSVs are written (default gputrace-sampling\<trace name> under the current directory).' }
+               top = @{ type = 'number'; description = 'How many source lines to return (default 20). The full table is always written to <workDir>\source_lines.csv.' }
+               python = @{ type = 'string'; description = 'Python 3.x executable. Only needed when neither GPUTRACE_PYTHON nor PATH provides one. Stdlib only - no packages.' }
+               skipAggregateCheck = @{ type = 'boolean'; description = 'Skip the global stall histogram and its cross-check against the capture''s own aggregate.' }
+           }
+           required = @('trace')
+       }
+       handler = 'Invoke-ToolSourceLines' }
 )
 
 $PROTOCOL_VERSION = '2024-11-05'

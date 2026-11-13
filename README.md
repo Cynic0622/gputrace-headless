@@ -2,7 +2,16 @@
 
 Headless capture and analysis of NVIDIA Nsight Graphics **GPU Trace** data — no GUI, no
 screenshots, no hand-copying numbers off a panel. A PowerShell CLI does the work; a thin MCP
-server exposes the same engine to an LLM agent.
+server exposes the same engine to LLM agents, and an agent skill teaches it to any coding
+agent.
+
+What makes this more than `ngfx` automation: **NVIDIA's CLI captures but does not analyze.**
+`ngfx` writes a capture plus a fixed set of aggregate export tables; there is no CLI command
+that opens a `.ngfx-gputrace` afterwards, and `ngfx-replay` rejects the GPU Trace container
+outright (`Invalid file header` — the replayer speaks a different format). Everything at the
+container level — the per-PC samples, the per-source-line attribution, the per-line stall
+mix that the GUI's Source Positions view renders — was reachable only through the GUI, until
+this decode.
 
 The point is not only automation. It is that **every number this tool reports is labelled with
 how far it can be trusted**, and a capture that fails validation is refused rather than returned
@@ -11,7 +20,11 @@ as data.
 ## Requirements
 
 - **Windows** with **Nsight Graphics** installed (developed and measured against 2026.1).
-- **PowerShell 5.1** — the only runtime. No Node, no Python, no packages to install.
+- **PowerShell 5.1** — the only runtime for capture, export reading and reporting. No Node, no
+  Python, no packages to install.
+- **Python 3** (stdlib only, no packages) — needed for exactly one thing: decoding the capture
+  container for per-source-line sampling analysis (`gputrace-sampling.ps1`). Everything else in
+  this tool runs without it.
 - A traced application that takes CLI arguments (see [Profiles](#profiles)).
 
 `ngfx.exe` and `ngfx-ui.exe` are found automatically: an explicit path first (`-NgfxPath`, or
@@ -57,6 +70,11 @@ before the first real capture.
 
 # 5. Read the per-variant counter breakdown.
 .\gputrace-report.ps1 -Validate -Regimes -Compare gputrace\arm0,gputrace\arm1
+
+# 6. Where the warps stall, per source line — decoded from the capture container, no GUI.
+#    Needs Python 3 (stdlib only). The step self-checks the decode against the capture's
+#    own aggregate and refuses to return the table when that check fails.
+.\gputrace-sampling.ps1 -Trace gputrace\arm1\Sandbox_2026_10_27_12_00_00.ngfx-gputrace -Json -Top 30
 ```
 
 ## Profiles
@@ -131,12 +149,30 @@ Four things the tool needs from the application, none of which the field table c
 Sanity-check a new profile with `-DryRun`: it prints the exact `ngfx` command line for every
 variant without running anything, which is where a wrong path or a missing flag shows up first.
 
+## For AI agents
+
+Two doors, same engine — pick whichever your client speaks:
+
+- **Skill** (recommended first): copy `skills\gputrace-headless\` into your agent's skills
+  directory (Claude Code: `.claude\skills\` project-level or `~\.claude\skills\` user-level;
+  ZCode and other CLIs: their skill folders). The SKILL.md teaches the workflows, the
+  accuracy contract and the pitfalls, so the agent drives the CLI correctly with no other
+  setup.
+- **MCP**: register `mcp\server.ps1` with your client (config snippets in
+  [mcp/README.md](mcp/README.md)). Structured tools with schemas; validation refusals and
+  evidence classes are embedded in every response. Tool: `gputrace_capture`, `gputrace_report`,
+  `gputrace_compare`, `gputrace_list_metrics`, `gputrace_raw_metric`, `gputrace_source_lines`.
+
+If both are configured the skill tells the agent to prefer the MCP tools; the CLI remains the
+fallback that always works.
+
 ## Layout
 
 | Script | Role |
 | --- | --- |
 | `gputrace-capture.ps1` | Captures one GPU Trace per profile variant with `ngfx`, unattended, and auto-exports the metrics. |
 | `gputrace-report.ps1` | Reads those exports, validates them, compares traces. The analysis engine. |
+| `gputrace-sampling.ps1` | Decodes the `.ngfx-gputrace` container itself: per-source-line warp-state sample attribution (the GUI Source Positions data) with an internal-consistency gate. Needs Python 3. |
 | `gputrace-common.ps1` | Shared discovery of `ngfx.exe` / `ngfx-ui.exe`. Dot-sourced by the two scripts above and by `gui-harvest.ps1`. |
 | `pipeline-dump-report.ps1` | Reads a pipeline dump (`pipelines.csv`): registers, binary size, stack size. |
 | `gui-harvest.ps1` | Screenshots and drives the Nsight Graphics UI. `-Action export` pulls the per-source-line attribution out as CSV — the one thing with no CLI front end. |
@@ -145,13 +181,15 @@ variant without running anything, which is where a wrong path or a missing flag 
 | `unlock-counters.ps1` | One-time: opens counter access to all users, so traces never need UAC again. |
 | `ngfx-extract-protos.py` | Recovers every `.proto` Nsight links into its binaries, so the capture format and the replayer's RPC can be read. See `schemas/`. |
 | `mcp\server.ps1` | MCP server (stdio) wrapping the CLI for an LLM agent. See [`mcp\README.md`](mcp/README.md). |
+| `skills\gputrace-headless\` | Agent skill (SKILL.md): workflows, accuracy contract and pitfalls for coding agents that drive the CLI. See [For AI agents](#for-ai-agents). |
 
 `mcp\README.md` covers the MCP installation, the client config snippets, the tool reference and
 the accuracy contract each response carries.
 
 `docs\nsight-gputrace-internals.md` maps what is reachable from the CLI and what is not: the
-capture container format, the per-PC attribution schema, the replayer's RPC transport, and why
-the GUI-only numbers cannot be exported. Read it before assuming something is out of reach.
+capture container format, the per-PC attribution schema, the replayer's RPC transport. Note it
+predates the per-source-line decode — where it calls the Source Positions numbers GUI-only,
+`gputrace-sampling.ps1` / `docs/per-source-line-solved-2026-10-19.md` supersede it.
 
 ## What was learned building this (the headless data map)
 
@@ -216,6 +254,7 @@ only navigate when the keyboard focus actually sits on the app.
 
 | Class | Meaning | How it is verified |
 | --- | --- | --- |
+| `sampled` | A quantity from the warp-state (PC) sampler — the same hardware source as the GUI Top Stall table. | Decoded from the capture container and cross-checked against the capture's own `GPUTrace.PCSampler.*` aggregate (`gputrace-sampling.ps1` refuses the table past a 1.0 pp deviation; measured 0.24 pp). Count-weighted, while GUI panel values are time-weighted — compare ranks and shapes. |
 | `count` | A raw event count. | Two independent traces of the same work must agree **exactly**. |
 | `invariant` | A physical constant the hardware guarantees. | Warp width is 32. It proves the counters are scaled correctly. |
 | `ratio` | A ratio with a known denominator. | Stable across independent traces to ~0.1%. |
@@ -255,8 +294,10 @@ one measured variant the GUI reported `LGTHR 28% / LGSB 19% / NOTSEL 19%` where 
 figures gave `NOTSEL 42% / MATHPT 34% / LGSB 3.4%`. **Compare directions, never absolute values.**
 Per-instruction and per-source-line attribution live in the same container and do **not** need the
 GUI: `gputrace-extract.py` locates the blob table and the PC-sample buffers by structure, and
-`pcs-lines.py` turns them into a per-source-line table. The derivation, the corrected mechanism and
-the measured limits are in [`docs/per-source-line-solved-2026-10-19.md`](docs/per-source-line-solved-2026-10-19.md)
+`pcs-lines.py` turns them into a per-source-line table — wrapped by `gputrace-sampling.ps1`,
+which adds Python discovery, the aggregate cross-check gate and a JSON report. The derivation,
+the corrected mechanism and the measured limits are in
+[`docs/per-source-line-solved-2026-10-19.md`](docs/per-source-line-solved-2026-10-19.md)
 — that document is the single source of truth; any older note calling this step GUI-only is stale.
 
 **Two stall metrics are pipe-qualified.** `long_scoreboard_pipe_l1tex` is long-scoreboard on the
@@ -278,7 +319,7 @@ not. Time the application with its own harness, never from these traces.
 | Did occupancy go up? | `registers` + `rate` | Yes — cross-checked against a second API. |
 | Did memory behaviour change? | `ratio` | L1 sector hit rate, stable to 0.1%. |
 | Is it faster? | — | **Not from here.** Time it with the application's own harness. |
-| Where are the warps stalling? | — | **Not from here.** Use the Nsight GUI, and compare directions only. |
+| Where are the warps stalling, per source line? | `sampled` | Yes — `gputrace-sampling.ps1 -Trace <capture>` decodes the warp-state samples in the capture container into a per-source-line table, no GUI. Count-weighted, so compare ranks and shapes, not absolute percentages against GUI panel values. |
 
 ## License
 
