@@ -116,7 +116,7 @@ def parse(data):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("spv", nargs="?", default=r"D:\Code\Bear\Bear\src\Shaders\ntcBenchmarkVecPS.spv")
+    ap.add_argument("spv")
     ap.add_argument("--out")
     ap.add_argument("--show", type=int, default=6, help="lines of each source to print")
     args = ap.parse_args()

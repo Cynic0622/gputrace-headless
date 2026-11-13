@@ -15,7 +15,7 @@ Usage:
 
 Examples:
     python ngfx-extract-protos.py \
-        "D:/NVIDIA Corporation/Nsight Graphics 2026.1.0/host/windows-desktop-nomad-x64/ngfx-rpc.exe" \
+        "<nsight-install>/host/windows-desktop-nomad-x64/ngfx-rpc.exe" \
         out
 
 Exit status is 0 on success. The tool prints one line per descriptor found.
