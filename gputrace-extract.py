@@ -53,7 +53,6 @@ Decoding is `lz4(stored) XOR keystream`, over the first `len(blob)` bytes.
 import argparse
 import csv
 import hashlib
-import importlib.util
 import os
 import struct
 import sys
@@ -74,15 +73,85 @@ BUF_MIN = 2_000_000
 BUF_MAX = 2_600_000
 
 
-def load_helper():
-    """Import the sibling research script for `sections()` and `lz4_block()`."""
-    path = os.path.join(HERE, "gputrace-pc2line.py")
-    if not os.path.exists(path):
-        raise SystemExit("gputrace-pc2line.py is required next to this script")
-    spec = importlib.util.spec_from_file_location("gputrace_pc2line", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+# ---------------------------------------------------------------- container
+# The WRPV container: an 8-byte header, then a chain of 24-byte outer records
+# (0x1234 magic, section count), each followed by `count` inner records
+# (0x4321 magic, on-disk and expanded sizes) that carry the LZ4 payload.
+OUTER_MAGIC = 0x1234
+INNER_MAGIC = 0x4321
+
+
+def lz4_block(src, uncompressed_size=None):
+    """Decode a raw LZ4 block.  A block carries no length, so walking to the end
+    of the input discovers the true output size; when the caller knows
+    `PbBlobEntry.uncompressedSize` the result must match it exactly."""
+    n = len(src)
+    i = 0
+    out = bytearray()
+    while i < n:
+        token = src[i]
+        i += 1
+        lit = token >> 4
+        if lit == 15:
+            while True:
+                if i >= n:
+                    raise ValueError("truncated literal length")
+                b = src[i]
+                i += 1
+                lit += b
+                if b != 255:
+                    break
+        if i + lit > n:
+            raise ValueError("literal overruns input")
+        out += src[i:i + lit]
+        i += lit
+        if i >= n:
+            break
+        if i + 2 > n:
+            raise ValueError("truncated match offset")
+        off = src[i] | (src[i + 1] << 8)
+        i += 2
+        if off == 0 or off > len(out):
+            raise ValueError("bad match offset %d" % off)
+        ml = token & 0x0F
+        if ml == 15:
+            while True:
+                if i >= n:
+                    raise ValueError("truncated match length")
+                b = src[i]
+                i += 1
+                ml += b
+                if b != 255:
+                    break
+        ml += 4
+        start = len(out) - off
+        for k in range(ml):
+            out.append(out[start + k])
+    if uncompressed_size is not None and len(out) != uncompressed_size:
+        raise ValueError("size mismatch: got %d, declared %d"
+                         % (len(out), uncompressed_size))
+    return bytes(out)
+
+
+def sections(buf):
+    """Yield (index, ident, compressed, uncompressed, header_offset)."""
+    total = len(buf)
+    off = 8
+    idx = 0
+    while off + 24 <= total:
+        if struct.unpack_from("<H", buf, off)[0] != OUTER_MAGIC:
+            return
+        count = struct.unpack_from("<I", buf, off + 8)[0]
+        off += 24
+        for _ in range(count):
+            if off + 24 > total:
+                return
+            im, ident, e, cs, us = struct.unpack_from("<HHIQQ", buf, off)
+            if im != INNER_MAGIC:
+                return
+            yield idx, ident, cs, us, off
+            off = off + 24 + cs
+            idx += 1
 
 
 def read_varint(buf, i, end):
@@ -178,7 +247,7 @@ def scan_buffers(section):
         i = tag + 1
 
 
-def deobfuscate(helper, payload, keystream, size):
+def deobfuscate(payload, keystream, size):
     """LZ4-decode, then XOR the declared keystream prefix.
 
     Order matters: the keystream is applied to the *decompressed* bytes, which
@@ -187,7 +256,7 @@ def deobfuscate(helper, payload, keystream, size):
     if size > len(keystream):
         raise SystemExit("blob of %d bytes exceeds the %d-byte keystream"
                          % (size, len(keystream)))
-    raw = helper.lz4_block(payload, size)
+    raw = lz4_block(payload, size)
     return bytes(a ^ b for a, b in zip(raw, keystream[:size]))
 
 
@@ -218,7 +287,6 @@ def main():
     with open(args.keystream, "rb") as fh:
         keystream = fh.read()
 
-    helper = load_helper()
     buf = open(args.capture, "rb").read()
     if not args.quiet:
         print("%s: %s bytes on disk" % (args.capture, format(len(buf), ",")))
@@ -233,9 +301,9 @@ def main():
     blobs = []
     buffers = []
 
-    for index, _ident, comp_size, uncomp_size, hdr in helper.sections(buf):
+    for index, _ident, comp_size, uncomp_size, hdr in sections(buf):
         try:
-            section = helper.lz4_block(buf[hdr + 24:hdr + 24 + comp_size],
+            section = lz4_block(buf[hdr + 24:hdr + 24 + comp_size],
                                        uncomp_size or None)
         except Exception as exc:                       # noqa: BLE001 - report, skip
             if not args.quiet:
@@ -273,7 +341,7 @@ def main():
 
     for _off, ent in sorted(entries, key=lambda p: p[1][1]):
         blob_id, payload, size = ent[1], ent[2], ent[3]
-        blob = deobfuscate(helper, payload, keystream, size)
+        blob = deobfuscate(payload, keystream, size)
         kind = classify(blob)
         for directory, stem in ((decoded_dir, "id%02d.bin"), (lines_dir, "blob%02d.bin")):
             with open(os.path.join(directory, stem % blob_id), "wb") as fh:
