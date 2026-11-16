@@ -4,9 +4,9 @@
 # VK_KHR_pipeline_executable_properties. This script pivots the ones that matter for shader work
 # into a single line per pipeline stage, and can diff two dumps:
 #
-#     .\pipeline-dump-report.ps1                                  # summarize ./pipeline-dump
-#     .\pipeline-dump-report.ps1 -Dir some\other\dump             # summarize elsewhere
-#     .\pipeline-dump-report.ps1 -Baseline pipeline-dump-before   # add a delta column
+#     .\cli\pipeline-dump-report.ps1                                  # summarize ./pipeline-dump
+#     .\cli\pipeline-dump-report.ps1 -Dir some\other\dump             # summarize elsewhere
+#     .\cli\pipeline-dump-report.ps1 -Baseline pipeline-dump-before   # add a delta column
 #
 # Columns:
 #   Registers  driver "Register Count" - what Nsight shows as Live Registers

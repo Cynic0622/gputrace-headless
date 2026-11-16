@@ -12,7 +12,7 @@
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$report = Join-Path $root 'gputrace-report.ps1'
+$report = Join-Path (Join-Path $root 'cli') 'gputrace-report.ps1'
 if (-not (Test-Path -LiteralPath $report)) { throw "no gputrace-report.ps1 at $report" }
 
 $cases = @(

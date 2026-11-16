@@ -32,7 +32,9 @@
 
 $ErrorActionPreference = 'Stop'
 $SERVER_ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
-$TOOLS_DIR = if ($env:GPUTRACE_TOOLS_DIR) { $env:GPUTRACE_TOOLS_DIR } else { Split-Path -Parent $SERVER_ROOT }
+# The CLI scripts live in the repo's cli\ directory; GPUTRACE_TOOLS_DIR overrides that
+# directory itself (it must contain gputrace-capture.ps1 and gputrace-report.ps1).
+$TOOLS_DIR = if ($env:GPUTRACE_TOOLS_DIR) { $env:GPUTRACE_TOOLS_DIR } else { Join-Path (Split-Path -Parent $SERVER_ROOT) 'cli' }
 $CAPTURE_SCRIPT = Join-Path $TOOLS_DIR 'gputrace-capture.ps1'
 $REPORT_SCRIPT = Join-Path $TOOLS_DIR 'gputrace-report.ps1'
 $SAMPLING_SCRIPT = Join-Path $TOOLS_DIR 'gputrace-sampling.ps1'

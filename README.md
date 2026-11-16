@@ -53,28 +53,28 @@ before the first real capture.
 
 ```powershell
 # 1. Capture. One trace per variant, warp-state sampling on, all metrics auto-exported.
-.\gputrace-capture.ps1 -Profile ntc-benchmark
+.\cli\gputrace-capture.ps1 -Profile ntc-benchmark
 
 # 2. Read, validate, compare.
-.\gputrace-report.ps1 -Validate -Compare gputrace\arm0,gputrace\arm1,gputrace\arm2
-.\gputrace-report.ps1 -Json -Validate -Dir gputrace\arm1     # for an agent to parse
+.\cli\gputrace-report.ps1 -Validate -Compare gputrace\arm0,gputrace\arm1,gputrace\arm2
+.\cli\gputrace-report.ps1 -Json -Validate -Dir gputrace\arm1     # for an agent to parse
 
 # 3. Registers / instruction footprint per variant, from a different API entirely.
 #    Run the application once with its own pipeline-dump switch ON - the bundled profile's `env`
 #    field holds that switch off during traces, so override it for this run - then:
-.\pipeline-dump-report.ps1
+.\cli\pipeline-dump-report.ps1
 
 # 4. Only when the counters themselves matter: one GPU Trace per variant.
 #    -MultiPassMetrics adds the 16-reason counter stall breakdown.
-.\gputrace-capture.ps1 -Profile ntc-benchmark -MultiPassMetrics
+.\cli\gputrace-capture.ps1 -Profile ntc-benchmark -MultiPassMetrics
 
 # 5. Read the per-variant counter breakdown.
-.\gputrace-report.ps1 -Validate -Regimes -Compare gputrace\arm0,gputrace\arm1
+.\cli\gputrace-report.ps1 -Validate -Regimes -Compare gputrace\arm0,gputrace\arm1
 
 # 6. Where the warps stall, per source line — decoded from the capture container, no GUI.
 #    Needs Python 3 (stdlib only). The step self-checks the decode against the capture's
 #    own aggregate and refuses to return the table when that check fails.
-.\gputrace-sampling.ps1 -Trace gputrace\arm1\Sandbox_2026_10_27_12_00_00.ngfx-gputrace -Json -Top 30
+.\cli\gputrace-sampling.ps1 -Trace gputrace\arm1\Sandbox_2026_10_27_12_00_00.ngfx-gputrace -Json -Top 30
 ```
 
 ## Profiles
@@ -168,18 +168,34 @@ fallback that always works.
 
 ## Layout
 
+`cli\` — the PowerShell engine:
+
 | Script | Role |
 | --- | --- |
 | `gputrace-capture.ps1` | Captures one GPU Trace per profile variant with `ngfx`, unattended, and auto-exports the metrics. |
 | `gputrace-report.ps1` | Reads those exports, validates them, compares traces. The analysis engine. |
-| `gputrace-sampling.ps1` | Decodes the `.ngfx-gputrace` container itself: per-source-line warp-state sample attribution (the GUI Source Positions data) with an internal-consistency gate. Needs Python 3. |
-| `gputrace-common.ps1` | Shared discovery of `ngfx.exe` / `ngfx-ui.exe`. Dot-sourced by the two scripts above and by `gui-harvest.ps1`. |
+| `gputrace-sampling.ps1` | Drives the decode chain: per-source-line warp-state sample attribution (the GUI Source Positions data) with an internal-consistency gate. Needs Python 3. |
+| `gputrace-common.ps1` | Shared discovery of `ngfx.exe` / `ngfx-ui.exe`. Dot-sourced by capture, report's neighbours and `gui-harvest.ps1`. |
 | `pipeline-dump-report.ps1` | Reads a pipeline dump (`pipelines.csv`): registers, binary size, stack size. |
-| `gui-harvest.ps1` | Screenshots and drives the Nsight Graphics UI. `-Action export` pulls the per-source-line attribution out as CSV — the one thing with no CLI front end. |
-| `crop-png.ps1` | Crops a harvested screenshot to the panel that matters. |
+| `gui-harvest.ps1` | Screenshots and drives the Nsight Graphics UI. `-Action export` produces the GUI export used to verify the decode. |
 | `keep-awake.ps1` | Stops the machine sleeping mid-capture. |
 | `unlock-counters.ps1` | One-time: opens counter access to all users, so traces never need UAC again. |
-| `ngfx-extract-protos.py` | Recovers every `.proto` Nsight links into its binaries (the capture format and the replayer's RPC) — the provenance of the container format this tool decodes; run it against your own install to regenerate the schemas locally. |
+
+`decode\` — the stdlib-only Python chain that `gputrace-sampling.ps1` drives (the container
+decode: WRPV sections, LZ4 + keystream, PC-sample records, `.debug_line` + OpLine join):
+
+| File | Role |
+| --- | --- |
+| `gputrace-extract.py` | Locates the blob table and the PC-sample buffers by structure, LZ4-decodes and de-obfuscates them. |
+| `pcs-samples.py` | Decodes the raw samples into per-PC stall attribution; `--verify` checks it against the capture's own aggregate. |
+| `pcs-lines.py` | Joins PCs to source lines and writes the per-source-line table. |
+| `dwarf-lines.py` / `spirv-debug-info.py` | `.debug_line` and SPIR-V `OpLine` parsers used by the join. |
+| `keystream.bin` | The capture-independent de-obfuscation keystream (a build constant, recovered once). |
+
+`mcp\` and `skills\` — the two agent facades over the same engine:
+
+| Path | Role |
+| --- | --- |
 | `mcp\server.ps1` | MCP server (stdio) wrapping the CLI for an LLM agent. See [`mcp\README.md`](mcp/README.md). |
 | `skills\gputrace-headless\` | Agent skill (SKILL.md): workflows, accuracy contract and pitfalls for coding agents that drive the CLI. See [For AI agents](#for-ai-agents). |
 

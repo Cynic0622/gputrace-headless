@@ -3,20 +3,20 @@
 # controls and pull the per-instruction attribution out as CSV. One action per invocation, so each
 # step can be chosen from what the previous screenshot actually showed.
 #
-#     .\gui-harvest.ps1 -Action shot  -Out gui\step1.png
-#     .\gui-harvest.ps1 -Action open  -TraceFile gputrace\arm0\Sandbox_*.ngfx-gputrace
-#     .\gui-harvest.ps1 -Action keys  -Keys '^o'        # then -Action shot to look
-#     .\gui-harvest.ps1 -Action close                 # close only instances we spawned
+#     .\cli\gui-harvest.ps1 -Action shot  -Out gui\step1.png
+#     .\cli\gui-harvest.ps1 -Action open  -TraceFile gputrace\arm0\Sandbox_*.ngfx-gputrace
+#     .\cli\gui-harvest.ps1 -Action keys  -Keys '^o'        # then -Action shot to look
+#     .\cli\gui-harvest.ps1 -Action close                 # close only instances we spawned
 #
 # The screenshot/keystroke actions above are coordinate-blind: they work only if the previous
 # screenshot showed you where to aim. For anything that has to hit a *named* control - tabs,
 # buttons, context-menu entries, dialog fields - use the UI Automation actions instead. They
 # locate elements by name, so they survive the window moving, DPI changes and layout drift:
 #
-#     .\gui-harvest.ps1 -Action selftest                      # is UI Automation usable here?
-#     .\gui-harvest.ps1 -Action find   -Name 'Shader'  -Out gui\find.txt
-#     .\gui-harvest.ps1 -Action invoke -Name 'Export to CSV...' -IdMatch 'Shader Source'
-#     .\gui-harvest.ps1 -Action export -ViewName 'Shader Source' -OutCsv gui\source.csv
+#     .\cli\gui-harvest.ps1 -Action selftest                      # is UI Automation usable here?
+#     .\cli\gui-harvest.ps1 -Action find   -Name 'Shader'  -Out gui\find.txt
+#     .\cli\gui-harvest.ps1 -Action invoke -Name 'Export to CSV...' -IdMatch 'Shader Source'
+#     .\cli\gui-harvest.ps1 -Action export -ViewName 'Shader Source' -OutCsv gui\source.csv
 #
 # `export` is the point of the UIA half: Nsight renders per-instruction attribution only in its
 # own views, and the CSV exporter behind those views (NV::UI::CSVExporter::ExportToFile) has no

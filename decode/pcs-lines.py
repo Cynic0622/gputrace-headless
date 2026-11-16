@@ -57,14 +57,14 @@ GUI's 109 reported lines present**.
 
 Usage
 -----
-    python pcs-lines.py --capture captures/exp/Sandbox_....ngfx-gputrace \
+    python decode/pcs-lines.py --capture captures/exp/Sandbox_....ngfx-gputrace \
                         --out out/exp/source_lines.csv
-    python pcs-lines.py --pcbuf out/exp/pcbuf \
+    python decode/pcs-lines.py --pcbuf out/exp/pcbuf \
                         --cubin out/exp/lines/blob06.bin \
                         --spirv  out/exp/decoded/id00.bin \
                         --out out/exp/source_lines.csv
-    python pcs-lines.py ... --verify gui/pcs_source.csv
-    python pcs-lines.py ... --per-pc out/exp/source_lines_per_pc.csv
+    python decode/pcs-lines.py ... --verify gui/pcs_source.csv
+    python decode/pcs-lines.py ... --per-pc out/exp/source_lines_per_pc.csv
 """
 import argparse
 import bisect

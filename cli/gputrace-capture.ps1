@@ -168,10 +168,11 @@ function Show-NewTraces {
 $ngfx = Find-Ngfx -Explicit $NgfxPath
 
 # A profile is required: it describes the capturable target (exe, work dir, architecture, app
-# args, variants). Names resolve under .\profiles, or pass an absolute/relative JSON path.
+# args, variants). Names resolve under <repo>\profiles, or pass an absolute/relative JSON path.
 $profilePath = $Profile
 if (-not [System.IO.Path]::IsPathRooted($profilePath)) {
-    $bundled = Join-Path $PSScriptRoot "profiles\$profilePath"
+    $repoRoot = Split-Path -Parent $PSScriptRoot
+    $bundled = Join-Path $repoRoot "profiles\$profilePath"
     if (Test-Path -LiteralPath "$bundled.json") { $profilePath = "$bundled.json" }
 }
 if (-not (Test-Path -LiteralPath $profilePath)) { throw "profile not found: $Profile (see profiles\)" }

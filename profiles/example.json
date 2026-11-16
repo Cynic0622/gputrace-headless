@@ -1,6 +1,6 @@
 {
   "name": "example",
-  "description": "TEMPLATE, not a runnable target. Copy this file to <your-target>.json, replace every <ANGLE-BRACKET> value, then run: .\\gputrace-capture.ps1 -Profile <your-target> -DryRun. The placeholders are left in on purpose - the capture stops on the first one and names it, instead of failing later on a path you never typed. 'env' is optional and normally left empty; fill it in only to force one of your application's diagnostic switches off, for example { \"YOUR_DUMP_SWITCH\": \"0\" }, so a trace sees the shaders as they normally compile.",
+  "description": "TEMPLATE, not a runnable target. Copy this file to <your-target>.json, replace every <ANGLE-BRACKET> value, then run: .\\cli\\gputrace-capture.ps1 -Profile <your-target> -DryRun. The placeholders are left in on purpose - the capture stops on the first one and names it, instead of failing later on a path you never typed. 'env' is optional and normally left empty; fill it in only to force one of your application's diagnostic switches off, for example { \"YOUR_DUMP_SWITCH\": \"0\" }, so a trace sees the shaders as they normally compile.",
 
   "workDir": "<ABSOLUTE-PATH-TO-YOUR-CHECKOUT>",
   "exe": "<PATH-TO-YOUR-EXE-RELATIVE-TO-workDir>",

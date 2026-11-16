@@ -79,7 +79,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# This wrapper lives in cli\; the decode chain it drives lives in the sibling decode\.
 $TOOLS_DIR = $PSScriptRoot
+$DECODE_DIR = Join-Path (Split-Path -Parent $PSScriptRoot) 'decode'
 
 # Exit codes: 0 ok; 1 failure (bad input, no python, decode error, or validation failed).
 
@@ -152,9 +154,9 @@ if (-not (Test-Path -LiteralPath $Trace -PathType Leaf)) {
     Write-Fail "trace not found: $Trace" @{ }
 }
 $Trace = (Resolve-Path -LiteralPath $Trace).Path
-$pcsLines = Join-Path $TOOLS_DIR 'pcs-lines.py'
-$pcsSamples = Join-Path $TOOLS_DIR 'pcs-samples.py'
-foreach ($dep in @($pcsLines, $pcsSamples, (Join-Path $TOOLS_DIR 'gputrace-extract.py'))) {
+$pcsLines = Join-Path $DECODE_DIR 'pcs-lines.py'
+$pcsSamples = Join-Path $DECODE_DIR 'pcs-samples.py'
+foreach ($dep in @($pcsLines, $pcsSamples, (Join-Path $DECODE_DIR 'gputrace-extract.py'))) {
     if (-not (Test-Path -LiteralPath $dep)) {
         Write-Fail "required script missing: $dep" @{ }
     }

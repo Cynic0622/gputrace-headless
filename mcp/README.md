@@ -32,8 +32,8 @@ ZCode（`~/.zcode/config.json` 或工作区 MCP 配置）：
 ```
 
 Claude Desktop / 其它客户端同理：command 指向 `powershell.exe`，args 指向本目录的 `server.ps1`。
-server 默认在上层目录找 CLI；若你把它单独放到别处，设环境变量 `GPUTRACE_TOOLS_DIR` 指向含
-`gputrace-capture.ps1` 与 `gputrace-report.ps1` 的目录。
+server 默认在上层目录的 `cli\` 子目录找 CLI；若你把它单独放到别处，设环境变量
+`GPUTRACE_TOOLS_DIR` 指向含 `gputrace-capture.ps1` 与 `gputrace-report.ps1` 的目录。
 
 ## 抓取目标（profile）
 

@@ -22,17 +22,17 @@ The CLI in this repository is the engine. Drive it directly:
 ```powershell
 # 1. Capture one trace per variant (warp-state sampling ON, all metrics auto-exported).
 #    Profiles describe the target: profiles\*.json, -DryRun first on a new one.
-.\gputrace-capture.ps1 -Profile <name-or-path>
+.\cli\gputrace-capture.ps1 -Profile <name-or-path>
 
 # 2. Validated report / comparison. Exits non-zero when validation fails.
-.\gputrace-report.ps1 -Validate -Compare gputrace\arm0,gputrace\arm1
-.\gputrace-report.ps1 -Json -Validate -Dir gputrace\arm1      # for agents to parse
+.\cli\gputrace-report.ps1 -Validate -Compare gputrace\arm0,gputrace\arm1
+.\cli\gputrace-report.ps1 -Json -Validate -Dir gputrace\arm1      # for agents to parse
 
 # 3. Per-source-line sampling attribution, decoded from the container (needs Python 3).
-.\gputrace-sampling.ps1 -Trace <path\to\capture.ngfx-gputrace> -Json -Top 30
+.\cli\gputrace-sampling.ps1 -Trace <path\to\capture.ngfx-gputrace> -Json -Top 30
 
 # 4. Registers / instruction footprint from a pipeline dump (different API entirely).
-.\pipeline-dump-report.ps1
+.\cli\pipeline-dump-report.ps1
 ```
 
 If the `gputrace` MCP server is configured in your client, prefer its tools
@@ -91,8 +91,9 @@ skill still applies: the accuracy contract below governs both.
 
 | Path | Role |
 | --- | --- |
-| `gputrace-capture.ps1` | headless capture, one trace per profile variant |
-| `gputrace-report.ps1` | validation + reporting + comparison (the analysis engine) |
-| `gputrace-sampling.ps1` | container decode -> per-source-line sample/stall table |
+| `cli\gputrace-capture.ps1` | headless capture, one trace per profile variant |
+| `cli\gputrace-report.ps1` | validation + reporting + comparison (the analysis engine) |
+| `cli\gputrace-sampling.ps1` | container decode -> per-source-line sample/stall table |
+| `decode\` | the stdlib-only Python chain the sampling wrapper drives (extract, stall decode, line join, keystream) |
 | `profiles\*.json` | target descriptions; `example.json` is the template |
 | `mcp\server.ps1` | MCP server wrapping the CLI |
