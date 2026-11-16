@@ -24,6 +24,14 @@
 # rebuildable from the capture with one command.
 /gputrace-sampling/
 
+# Local research trail, deliberately unpublished: the reverse-engineering docs, NVIDIA's
+# extracted .proto schemas, and two superseded research scripts. They stay on disk for the
+# author; the published tree is the tool only.
+/docs/
+/schemas/
+/verify-extract.py
+/gputrace-pc2line.py
+
 # Build products of the tools under tools/
 tools/vklayer/*.obj
 tools/vklayer/*.exp

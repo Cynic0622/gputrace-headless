@@ -20,8 +20,8 @@
 #
 # `export` is the point of the UIA half: Nsight renders per-instruction attribution only in its
 # own views, and the CSV exporter behind those views (NV::UI::CSVExporter::ExportToFile) has no
-# CLI front end. Driving the GUI is the one supported route to that data. See
-# docs/nsight-gputrace-internals.md.
+# CLI front end. Driving the GUI is the one supported route to that data, and the only reason
+# this script exists - gputrace-sampling.ps1 reaches the same samples from inside the container.
 #
 # What the UI actually looks like (measured on 2026.1.0, a trace loaded). Nsight is Qt, so every
 # AutomationId is the full object path, which is what makes -IdMatch the precise way to aim:

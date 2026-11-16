@@ -61,7 +61,8 @@
       set 1 "Throughput Metrics" lacks the thread-per-instruction ratio and the RF-occupancy
       counter; set 2 "Top-Level Triage" has both, but enabling the real-time shader profiler
       replaces the RF-occupancy counter, so `registers` and `sampling-provenance` cannot both PASS
-      on one trace. This is Nsight behaviour, not a bug here - see docs/validation-2026-10-27.md.
+      on one trace. This is Nsight behaviour, not a bug here - it was measured across both sets
+      on 2026-10-27, driver 610.88.
     * At least one stall metric is pipe-qualified - smsp__warps_issue_stalled_long_scoreboard_pipe_l1tex
       is long-scoreboard on the L1TEX pipe only, not the total - which distorts any share computed
       by dividing by the sum of the reasons.

@@ -6,7 +6,7 @@ Nsight Graphics' TPS (Target Platform Server) layer links each .proto into the b
 as a raw, uncompressed, contiguous serialized FileDescriptorProto. The protobuf wire
 format is parsed here directly, so no protobuf runtime is required.
 
-This is how the schemas under schemas/ngfx-<version>/ were produced. Re-run it after
+This is how the author's local schemas/ngfx-<version>/ copy was produced. Re-run it after
 an Nsight upgrade to see what changed.
 
 Usage:

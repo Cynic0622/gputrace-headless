@@ -179,17 +179,12 @@ fallback that always works.
 | `crop-png.ps1` | Crops a harvested screenshot to the panel that matters. |
 | `keep-awake.ps1` | Stops the machine sleeping mid-capture. |
 | `unlock-counters.ps1` | One-time: opens counter access to all users, so traces never need UAC again. |
-| `ngfx-extract-protos.py` | Recovers every `.proto` Nsight links into its binaries, so the capture format and the replayer's RPC can be read. See `schemas/`. |
+| `ngfx-extract-protos.py` | Recovers every `.proto` Nsight links into its binaries (the capture format and the replayer's RPC) — the provenance of the container format this tool decodes; run it against your own install to regenerate the schemas locally. |
 | `mcp\server.ps1` | MCP server (stdio) wrapping the CLI for an LLM agent. See [`mcp\README.md`](mcp/README.md). |
 | `skills\gputrace-headless\` | Agent skill (SKILL.md): workflows, accuracy contract and pitfalls for coding agents that drive the CLI. See [For AI agents](#for-ai-agents). |
 
 `mcp\README.md` covers the MCP installation, the client config snippets, the tool reference and
 the accuracy contract each response carries.
-
-`docs\nsight-gputrace-internals.md` maps what is reachable from the CLI and what is not: the
-capture container format, the per-PC attribution schema, the replayer's RPC transport. Note it
-predates the per-source-line decode — where it calls the Source Positions numbers GUI-only,
-`gputrace-sampling.ps1` / `docs/per-source-line-solved-2026-10-19.md` supersede it.
 
 ## What was learned building this (the headless data map)
 
@@ -221,13 +216,11 @@ ngfx --activity "GPU Trace Profiler" ... --metric-set-id 1 --multi-pass-metrics 
 **Where the per-PC / per-source-line numbers live.** The capture carries the raw
 warp-state sample buffer and nothing else about the shader. `pcSamplesStorage`
 decodes headlessly to per-PC sample counts and per-PC stall reasons (verified
-against the capture's own `GPUTrace.PCSampler.*` aggregate), but the PC →
-source-line step needs a cubin with a DWARF line table, and the GPU Trace host
-only embeds one when *Tools → Options → Search Paths → Separate Shader Debug
-Information* is configured — which it is not by default. The whole chain, with
-the `WarpVizPlugin.dll` addresses and strings behind each step, is in
-[`docs/warpviz-decompile-2026-10-15.md`](docs/warpviz-decompile-2026-10-15.md);
-current state is in [`docs/HANDOFF.md`](docs/HANDOFF.md).
+against the capture's own `GPUTrace.PCSampler.*` aggregate), and the GPU Trace host
+only embeds a cubin with a DWARF line table when *Tools → Options → Search Paths →
+Separate Shader Debug Information* is configured — which it is not by default.
+The per-source-line join below works without it: the capture embeds the shader's
+SPIR-V (with OpLine records) and the driver's cubin regardless.
 
 **The per-pass timing breakdown was always in the export.** `D3DPERF_EVENTS.xls` is one row per
 named event, one ms column per traced frame — the pass/draw split, no GUI needed.
@@ -295,10 +288,9 @@ figures gave `NOTSEL 42% / MATHPT 34% / LGSB 3.4%`. **Compare directions, never 
 Per-instruction and per-source-line attribution live in the same container and do **not** need the
 GUI: `gputrace-extract.py` locates the blob table and the PC-sample buffers by structure, and
 `pcs-lines.py` turns them into a per-source-line table — wrapped by `gputrace-sampling.ps1`,
-which adds Python discovery, the aggregate cross-check gate and a JSON report. The derivation,
-the corrected mechanism and the measured limits are in
-[`docs/per-source-line-solved-2026-10-19.md`](docs/per-source-line-solved-2026-10-19.md)
-— that document is the single source of truth; any older note calling this step GUI-only is stale.
+which adds Python discovery, the aggregate cross-check gate and a JSON report. Against a
+same-capture GUI export the decode reproduces 122/122 lines at Spearman rho 1.0000 (top-20
+overlap 20/20, residual 0.0011%); any note calling this step GUI-only is stale.
 
 **Two stall metrics are pipe-qualified.** `long_scoreboard_pipe_l1tex` is long-scoreboard on the
 L1TEX pipe only, and `mio_throttle_pipe_mio` similarly. They are subsets, so any share computed by

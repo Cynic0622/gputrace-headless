@@ -66,8 +66,8 @@ server 默认在上层目录找 CLI；若你把它单独放到别处，设环境
 - **逐源码行采样归因（Source Positions）** 不在结构化 CSV 导出里，但**不需要 GUI**：
   `gputrace_source_lines` 工具直接解码 trace 容器产出逐源码行表（每行的样本数与 stall 构成）。
   该解码是本工具唯一需要 **Python 3**（仅标准库、无包）的部分——用 `python` 输入参数或
-  `$env:GPUTRACE_PYTHON` 指定解释器；未配置时返回结构化错误并给出补救说明。机制、推导与
-  验证记录见 [`docs/per-source-line-solved-2026-10-19.md`](../docs/per-source-line-solved-2026-10-19.md)。
+  `$env:GPUTRACE_PYTHON` 指定解释器；未配置时返回结构化错误并给出补救说明。对拍同抓帧 GUI
+  导出可复现 122/122 行、rho 1.0000。
 - **per-PSO Instruction Mix**（每个着色器的指令构成统计）仍无 headless 通路。
 - Nsight Graphics 2026.1 + Ada 实测；其它架构/版本的指标名集合可能不同——先用
   `gputrace_list_metrics` 确认。

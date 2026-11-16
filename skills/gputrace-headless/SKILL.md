@@ -96,5 +96,3 @@ skill still applies: the accuracy contract below governs both.
 | `gputrace-sampling.ps1` | container decode -> per-source-line sample/stall table |
 | `profiles\*.json` | target descriptions; `example.json` is the template |
 | `mcp\server.ps1` | MCP server wrapping the CLI |
-| `docs\HANDOFF.md` | reverse-engineering trail: container format, PC-sample records, what was proven and how |
-| `docs\per-source-line-solved-2026-10-19.md` | the per-source-line derivation and its GUI verification (122/122 lines, rho 1.0000) |
