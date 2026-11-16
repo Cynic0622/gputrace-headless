@@ -85,7 +85,7 @@ function Test-Elevated {
 }
 
 # GeForce hands GPU performance counters only to elevated processes unless this key is 0. Set it
-# once with tools/unlock-counters.ps1 and every trace runs unattended - no UAC, no relaunch.
+# once with unlock-counters.ps1 and every trace runs unattended - no UAC, no relaunch.
 # The driver only honours the key after a reload (reboot), so the registry alone is not proof:
 # Test-CountersUsable probes with a one-frame capture before trusting it.
 function Test-CountersUnlocked {
@@ -346,7 +346,7 @@ if ($DryRun) {
 
 if (-not (Test-Elevated) -and -not (Test-CountersUsable -Ngfx $ngfx -AppPath $appPath -WorkDir $WorkDir -ProbeArgs $targets[0].Args)) {
     Write-Host 'GPU performance counters need an elevated process; relaunching with a UAC prompt...'
-    Write-Host '(one-time fix: run tools/unlock-counters.ps1, then reboot, to remove this prompt forever)'
+    Write-Host '(one-time fix: run unlock-counters.ps1, then reboot, to remove this prompt forever)'
 
     # An elevated process gets its own console, and that console closes with it, so without the
     # transcript a failed run leaves nothing to look at.
